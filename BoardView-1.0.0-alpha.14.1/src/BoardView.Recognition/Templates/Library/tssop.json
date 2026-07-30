@@ -1,0 +1,22 @@
+{
+  "Name": "TSSOP",
+  "Family": "Tssop",
+  "MinPads": 8,
+  "MaxPads": 64,
+  "MinRows": 2,
+  "MaxRows": 2,
+  "MinColumns": 4,
+  "MaxColumns": 32,
+  "MinPitch": 0.3,
+  "MaxPitch": 0.79,
+  "MinOccupancy": 0.7,
+  "MaxOccupancy": 1,
+  "MinSymmetry": 0.65,
+  "MinAspectRatio": 1.2,
+  "MaxAspectRatio": 8,
+  "RequiresSquareMatrix": false,
+  "RequiresTwoRows": true,
+  "RequiresFourSides": false,
+  "AcceptanceScore": 0.72,
+  "Priority": 90
+}

@@ -1,0 +1,22 @@
+{
+  "Name": "SOIC",
+  "Family": "Soic",
+  "MinPads": 6,
+  "MaxPads": 32,
+  "MinRows": 2,
+  "MaxRows": 2,
+  "MinColumns": 3,
+  "MaxColumns": 16,
+  "MinPitch": 0.8,
+  "MaxPitch": 1.5,
+  "MinOccupancy": 0.7,
+  "MaxOccupancy": 1,
+  "MinSymmetry": 0.65,
+  "MinAspectRatio": 1.2,
+  "MaxAspectRatio": 6,
+  "RequiresSquareMatrix": false,
+  "RequiresTwoRows": true,
+  "RequiresFourSides": false,
+  "AcceptanceScore": 0.72,
+  "Priority": 80
+}

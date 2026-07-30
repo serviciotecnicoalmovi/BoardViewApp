@@ -1,0 +1,22 @@
+{
+  "Name": "CHIP-2",
+  "Family": "Chip2",
+  "MinPads": 2,
+  "MaxPads": 2,
+  "MinRows": 1,
+  "MaxRows": 2,
+  "MinColumns": 1,
+  "MaxColumns": 2,
+  "MinPitch": 0,
+  "MaxPitch": 10,
+  "MinOccupancy": 0.8,
+  "MaxOccupancy": 1,
+  "MinSymmetry": 0.5,
+  "MinAspectRatio": 0,
+  "MaxAspectRatio": 20,
+  "RequiresSquareMatrix": false,
+  "RequiresTwoRows": false,
+  "RequiresFourSides": false,
+  "AcceptanceScore": 0.75,
+  "Priority": 100
+}

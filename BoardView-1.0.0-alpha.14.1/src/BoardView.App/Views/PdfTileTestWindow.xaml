@@ -1,0 +1,11 @@
+<Window x:Class="BoardView.App.Views.PdfTileTestWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:BoardView.App.Controls"
+        Title="Prueba aislada PDFium"
+        Width="1200"
+        Height="800"
+        WindowStartupLocation="CenterScreen">
+
+  <controls:PdfTileTestView />
+</Window>

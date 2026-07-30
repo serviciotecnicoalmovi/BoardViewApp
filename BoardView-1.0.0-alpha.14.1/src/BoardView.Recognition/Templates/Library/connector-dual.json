@@ -1,0 +1,22 @@
+{
+  "Name": "CONNECTOR-DUAL",
+  "Family": "DualRowConnector",
+  "MinPads": 4,
+  "MaxPads": 200,
+  "MinRows": 2,
+  "MaxRows": 2,
+  "MinColumns": 2,
+  "MaxColumns": 100,
+  "MinPitch": 0.5,
+  "MaxPitch": 5,
+  "MinOccupancy": 0.6,
+  "MaxOccupancy": 1,
+  "MinSymmetry": 0.45,
+  "MinAspectRatio": 1,
+  "MaxAspectRatio": 100,
+  "RequiresSquareMatrix": false,
+  "RequiresTwoRows": true,
+  "RequiresFourSides": false,
+  "AcceptanceScore": 0.65,
+  "Priority": 35
+}

@@ -1,0 +1,267 @@
+<Window x:Class="BoardView.App.Views.GeometryInspectorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Geometry Inspector"
+        Width="1180"
+        Height="760"
+        MinWidth="900"
+        MinHeight="560"
+        WindowStartupLocation="CenterOwner"
+        Background="#0B1118">
+
+  <Window.Resources>
+    <SolidColorBrush x:Key="InspectorBackgroundBrush" Color="#0B1118" />
+    <SolidColorBrush x:Key="InspectorAlternateBrush" Color="#111C27" />
+    <SolidColorBrush x:Key="InspectorHeaderBrush" Color="#162838" />
+    <SolidColorBrush x:Key="InspectorBorderBrush" Color="#294258" />
+    <SolidColorBrush x:Key="InspectorTextBrush" Color="#F5F7FA" />
+    <SolidColorBrush x:Key="InspectorAccentBrush" Color="#12BFFF" />
+    <SolidColorBrush x:Key="InspectorNumberBrush" Color="#8BE9A8" />
+    <SolidColorBrush x:Key="InspectorWarningBrush" Color="#FFD84D" />
+
+    <Style x:Key="InspectorDataGridStyle" TargetType="DataGrid">
+      <Setter Property="Background" Value="{StaticResource InspectorBackgroundBrush}" />
+      <Setter Property="Foreground" Value="{StaticResource InspectorTextBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource InspectorBorderBrush}" />
+      <Setter Property="HorizontalGridLinesBrush" Value="#203547" />
+      <Setter Property="VerticalGridLinesBrush" Value="#203547" />
+      <Setter Property="RowBackground" Value="{StaticResource InspectorBackgroundBrush}" />
+      <Setter Property="AlternatingRowBackground" Value="{StaticResource InspectorAlternateBrush}" />
+      <Setter Property="GridLinesVisibility" Value="Horizontal" />
+      <Setter Property="HeadersVisibility" Value="Column" />
+      <Setter Property="RowHeaderWidth" Value="0" />
+      <Setter Property="AlternationCount" Value="2" />
+      <Setter Property="CellStyle">
+        <Setter.Value>
+          <Style TargetType="DataGridCell">
+            <Setter Property="Foreground" Value="{StaticResource InspectorTextBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="#203547" />
+            <Setter Property="Padding" Value="6,3" />
+            <Style.Triggers>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="#245878" />
+                <Setter Property="Foreground" Value="#FFFFFF" />
+              </Trigger>
+            </Style.Triggers>
+          </Style>
+        </Setter.Value>
+      </Setter>
+      <Setter Property="ColumnHeaderStyle">
+        <Setter.Value>
+          <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="{StaticResource InspectorHeaderBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource InspectorAccentBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource InspectorBorderBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="7,5" />
+          </Style>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="InspectorTextCellStyle" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource InspectorTextBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style x:Key="InspectorNumberCellStyle" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource InspectorNumberBrush}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style x:Key="InspectorWarningCellStyle" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource InspectorWarningBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </Window.Resources>
+  <Grid Margin="16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="12" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <Border Padding="14" Background="#111C27" BorderBrush="#294258" BorderThickness="1" CornerRadius="4">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="8" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <StackPanel>
+          <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="#12BFFF" Text="GEOMETRY INSPECTOR" />
+          <TextBlock x:Name="DatabaseSummaryText" Margin="0,6,0,0" Foreground="#E7EEF5" />
+          <TextBlock x:Name="RecognitionSummaryText" Margin="0,3,0,0" Foreground="#9FB3C8" />
+        </StackPanel>
+        <Button Grid.Column="1" Width="112" Height="32" VerticalAlignment="Center" Click="OnExportJsonClick" Content="Exportar JSON" />
+        <Button Grid.Column="3" Width="92" Height="32" VerticalAlignment="Center" Click="OnCloseClick" Content="Cerrar" />
+      </Grid>
+    </Border>
+
+    <TabControl Grid.Row="2" Background="#0F1822" BorderBrush="#294258" Foreground="#E7EEF5">
+      <TabItem Header="Resumen">
+        <Grid Margin="12">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="16" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <GroupBox Header="Tipos almacenados" Foreground="#E7EEF5">
+            <DataGrid x:Name="TypeCountsGrid"
+                      Margin="8"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      CanUserAddRows="False"
+                      HeadersVisibility="Column"
+                      Style="{StaticResource InspectorDataGridStyle}">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="" Binding="{Binding Icon}" ElementStyle="{StaticResource InspectorTextCellStyle}" Width="42" CanUserSort="False" />
+                <DataGridTextColumn Header="Tipo" Binding="{Binding Kind}" ElementStyle="{StaticResource InspectorTextCellStyle}" Width="*" />
+                <DataGridTextColumn Header="Cantidad" Binding="{Binding Count, StringFormat=N0}" ElementStyle="{StaticResource InspectorNumberCellStyle}" Width="120" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+          <GroupBox Grid.Column="2" Header="Diagnóstico de reconocimiento" Foreground="#E7EEF5">
+            <DataGrid x:Name="RejectionCountsGrid"
+                      Margin="8"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      CanUserAddRows="False"
+                      HeadersVisibility="Column"
+                      Style="{StaticResource InspectorDataGridStyle}">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Resultado" Binding="{Binding Reason}" ElementStyle="{StaticResource InspectorWarningCellStyle}" Width="*" />
+                <DataGridTextColumn Header="Cantidad" Binding="{Binding Count, StringFormat=N0}" ElementStyle="{StaticResource InspectorNumberCellStyle}" Width="120" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Primitivas geométricas">
+        <DataGrid x:Name="EntriesGrid"
+                  Margin="12"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserAddRows="False"
+                  EnableRowVirtualization="True"
+                  EnableColumnVirtualization="True"
+                  Style="{StaticResource InspectorDataGridStyle}">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="ID" Binding="{Binding SourceElementId}" Width="190" />
+            <DataGridTextColumn Header="Capa" Binding="{Binding LayerId}" Width="150" />
+            <DataGridTextColumn Header="Tipo" Binding="{Binding Kind}" Width="125" />
+            <DataGridTextColumn Header="Clase origen" Binding="{Binding SourceType}" Width="175" />
+            <DataGridTextColumn Header="X" Binding="{Binding Bounds.Left, StringFormat=F4}" Width="90" />
+            <DataGridTextColumn Header="Y" Binding="{Binding Bounds.Top, StringFormat=F4}" Width="90" />
+            <DataGridTextColumn Header="Ancho mm" Binding="{Binding Width, StringFormat=F4}" Width="95" />
+            <DataGridTextColumn Header="Alto mm" Binding="{Binding Height, StringFormat=F4}" Width="95" />
+            <DataGridCheckBoxColumn Header="Cerrada" Binding="{Binding IsClosed}" Width="80" />
+            <DataGridCheckBoxColumn Header="Rellena" Binding="{Binding IsFilled}" Width="80" />
+          </DataGrid.Columns>
+        </DataGrid>
+      </TabItem>
+
+      <TabItem Header="Candidatos">
+        <DataGrid x:Name="CandidatesGrid"
+                  Margin="12"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserAddRows="False"
+                  EnableRowVirtualization="True"
+                  Style="{StaticResource InspectorDataGridStyle}">
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="ID" Binding="{Binding SourceElementId}" Width="190" />
+            <DataGridTextColumn Header="Forma" Binding="{Binding Kind}" Width="150" />
+            <DataGridCheckBoxColumn Header="Aceptado" Binding="{Binding Accepted}" Width="90" />
+            <DataGridTextColumn Header="Motivo" Binding="{Binding RejectionReason}" Width="180" />
+            <DataGridTextColumn Header="Confianza" Binding="{Binding Confidence, StringFormat=P1}" Width="100" />
+            <DataGridTextColumn Header="Repeticiones" Binding="{Binding RepetitionCount}" Width="100" />
+            <DataGridTextColumn Header="Alineados" Binding="{Binding AlignedNeighborCount}" Width="90" />
+          </DataGrid.Columns>
+        </DataGrid>
+      </TabItem>
+
+      <TabItem Header="Semántica">
+        <Grid Margin="12">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="340" />
+            <ColumnDefinition Width="16" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <GroupBox Header="Entidades semánticas" Foreground="#E7EEF5">
+            <DataGrid x:Name="SemanticCountsGrid"
+                      Margin="8"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      CanUserAddRows="False"
+                      Style="{StaticResource InspectorDataGridStyle}">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="" Binding="{Binding Icon}" ElementStyle="{StaticResource InspectorTextCellStyle}" Width="42" CanUserSort="False" />
+                <DataGridTextColumn Header="Semántica" Binding="{Binding Semantic}" ElementStyle="{StaticResource InspectorTextCellStyle}" Width="*" />
+                <DataGridTextColumn Header="Cantidad" Binding="{Binding Count, StringFormat=N0}" ElementStyle="{StaticResource InspectorNumberCellStyle}" Width="110" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+          <GroupBox Grid.Column="2" Header="Clasificación detallada" Foreground="#E7EEF5">
+            <DataGrid x:Name="SemanticPrimitivesGrid"
+                      Margin="8"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      CanUserAddRows="False"
+                      EnableRowVirtualization="True"
+                      EnableColumnVirtualization="True"
+                      Style="{StaticResource InspectorDataGridStyle}">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="ID" Binding="{Binding SourceElementId}" Width="185" />
+                <DataGridTextColumn Header="Geometría" Binding="{Binding GeometryKind}" Width="110" />
+                <DataGridTextColumn Header="Semántica" Binding="{Binding Semantic}" Width="130" />
+                <DataGridTextColumn Header="Confianza" Binding="{Binding Confidence, StringFormat=P1}" Width="95" />
+                <DataGridTextColumn Header="Regla" Binding="{Binding Rule}" Width="*" />
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Componentes">
+        <Grid Margin="12">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="320"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <GroupBox Header="Footprints reconocidos" Foreground="#E7EEF5">
+            <DataGrid x:Name="FootprintCountsGrid" Margin="8" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" Style="{StaticResource InspectorDataGridStyle}">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Familia" Binding="{Binding Kind}" Width="*"/>
+                <DataGridTextColumn Header="Cantidad" Binding="{Binding Count, StringFormat=N0}" ElementStyle="{StaticResource InspectorNumberCellStyle}" Width="100"/>
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+          <GroupBox Grid.Column="2" Header="Componentes construidos" Foreground="#E7EEF5">
+            <DataGrid x:Name="ComponentsGrid" Margin="8" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" EnableRowVirtualization="True" Style="{StaticResource InspectorDataGridStyle}">
+              <DataGrid.Columns>
+                <DataGridTextColumn Header="Referencia" Binding="{Binding Reference}" Width="120"/>
+                <DataGridTextColumn Header="Footprint" Binding="{Binding Footprint.Name}" Width="130"/>
+                <DataGridTextColumn Header="Plantilla" Binding="{Binding Footprint.TemplateMatch.TemplateName}" Width="145"/>
+                <DataGridTextColumn Header="Score" Binding="{Binding Footprint.TemplateMatch.Score, StringFormat=P1}" Width="80"/>
+                <DataGridTextColumn Header="Estado" Binding="{Binding Footprint.TemplateMatch.Status}" Width="150"/>
+                <DataGridTextColumn Header="Pads" Binding="{Binding Footprint.Metrics.PadCount}" Width="75"/>
+                <DataGridTextColumn Header="Filas" Binding="{Binding Footprint.Metrics.Rows}" Width="65"/>
+                <DataGridTextColumn Header="Columnas" Binding="{Binding Footprint.Metrics.Columns}" Width="80"/>
+                <DataGridTextColumn Header="Pitch X" Binding="{Binding Footprint.Metrics.PitchX, StringFormat=F3}" Width="80"/>
+                <DataGridTextColumn Header="Pitch Y" Binding="{Binding Footprint.Metrics.PitchY, StringFormat=F3}" Width="80"/>
+                <DataGridTextColumn Header="Rotación" Binding="{Binding RotationDegrees, StringFormat=F1}" Width="80"/>
+                <DataGridTextColumn Header="Confianza" Binding="{Binding Confidence, StringFormat=P1}" Width="90"/>
+              </DataGrid.Columns>
+            </DataGrid>
+          </GroupBox>
+        </Grid>
+      </TabItem>
+    </TabControl>
+
+    <TextBlock Grid.Row="3"
+               Margin="0,10,0,0"
+               Foreground="#7890A6"
+               Text="La base geométrica enumera todos los elementos normalizados; la clasificación y el detector son etapas posteriores y pueden contener menos registros." />
+  </Grid>
+</Window>

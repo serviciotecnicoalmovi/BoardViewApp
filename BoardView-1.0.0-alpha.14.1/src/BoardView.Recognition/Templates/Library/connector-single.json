@@ -1,0 +1,22 @@
+{
+  "Name": "CONNECTOR-SINGLE",
+  "Family": "SingleRowConnector",
+  "MinPads": 3,
+  "MaxPads": 100,
+  "MinRows": 1,
+  "MaxRows": 1,
+  "MinColumns": 3,
+  "MaxColumns": 100,
+  "MinPitch": 0.5,
+  "MaxPitch": 5,
+  "MinOccupancy": 0.8,
+  "MaxOccupancy": 1,
+  "MinSymmetry": 0.4,
+  "MinAspectRatio": 2,
+  "MaxAspectRatio": 100,
+  "RequiresSquareMatrix": false,
+  "RequiresTwoRows": false,
+  "RequiresFourSides": false,
+  "AcceptanceScore": 0.65,
+  "Priority": 30
+}

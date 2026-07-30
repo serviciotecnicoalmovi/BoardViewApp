@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>BoardView.Core.Tests</AssemblyName>
+    <RootNamespace>BoardView.Core.Tests</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BoardView.Core\BoardView.Core.csproj" />
+    <ProjectReference Include="..\..\src\BoardView.Formats\BoardView.Formats.csproj" />
+    <ProjectReference Include="..\..\src\BoardView.GeometryKernel\BoardView.GeometryKernel.csproj" />
+    <ProjectReference Include="..\..\src\BoardView.Rendering\BoardView.Rendering.csproj" />
+    <ProjectReference Include="..\..\src\BoardView.SemanticKernel\BoardView.SemanticKernel.csproj" />
+    <ProjectReference Include="..\..\src\BoardView.Recognition\BoardView.Recognition.csproj" />
+  </ItemGroup>
+</Project>

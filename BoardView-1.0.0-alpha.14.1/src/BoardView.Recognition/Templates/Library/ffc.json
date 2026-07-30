@@ -1,0 +1,22 @@
+{
+  "Name": "FFC",
+  "Family": "Ffc",
+  "MinPads": 4,
+  "MaxPads": 100,
+  "MinRows": 1,
+  "MaxRows": 2,
+  "MinColumns": 2,
+  "MaxColumns": 100,
+  "MinPitch": 0.2,
+  "MaxPitch": 1.5,
+  "MinOccupancy": 0.6,
+  "MaxOccupancy": 1,
+  "MinSymmetry": 0.5,
+  "MinAspectRatio": 2,
+  "MaxAspectRatio": 100,
+  "RequiresSquareMatrix": false,
+  "RequiresTwoRows": false,
+  "RequiresFourSides": false,
+  "AcceptanceScore": 0.68,
+  "Priority": 70
+}

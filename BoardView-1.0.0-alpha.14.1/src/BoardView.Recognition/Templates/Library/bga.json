@@ -1,0 +1,22 @@
+{
+  "Name": "BGA",
+  "Family": "Bga",
+  "MinPads": 9,
+  "MaxPads": 2500,
+  "MinRows": 3,
+  "MaxRows": 60,
+  "MinColumns": 3,
+  "MaxColumns": 60,
+  "MinPitch": 0.3,
+  "MaxPitch": 1.5,
+  "MinOccupancy": 0.55,
+  "MaxOccupancy": 1,
+  "MinSymmetry": 0.7,
+  "MinAspectRatio": 0.65,
+  "MaxAspectRatio": 1.55,
+  "RequiresSquareMatrix": true,
+  "RequiresTwoRows": false,
+  "RequiresFourSides": false,
+  "AcceptanceScore": 0.75,
+  "Priority": 95
+}

@@ -1,0 +1,22 @@
+{
+  "Name": "QFP",
+  "Family": "Qfp",
+  "MinPads": 16,
+  "MaxPads": 256,
+  "MinRows": 4,
+  "MaxRows": 80,
+  "MinColumns": 4,
+  "MaxColumns": 80,
+  "MinPitch": 0.3,
+  "MaxPitch": 1.27,
+  "MinOccupancy": 0.05,
+  "MaxOccupancy": 0.65,
+  "MinSymmetry": 0.7,
+  "MinAspectRatio": 0.6,
+  "MaxAspectRatio": 1.7,
+  "RequiresSquareMatrix": false,
+  "RequiresTwoRows": false,
+  "RequiresFourSides": true,
+  "AcceptanceScore": 0.72,
+  "Priority": 84
+}

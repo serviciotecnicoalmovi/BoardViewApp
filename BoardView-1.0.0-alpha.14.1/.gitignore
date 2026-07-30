@@ -1,0 +1,22 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Build output
+**/bin/
+**/obj/
+artifacts/
+
+# Logs and user settings
+logs/
+*.log
+appsettings.user.json
+
+# Packages
+*.nupkg
+packages/
+
+# Operating system
+Thumbs.db
+.DS_Store

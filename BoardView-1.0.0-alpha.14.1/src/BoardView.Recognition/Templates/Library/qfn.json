@@ -1,0 +1,22 @@
+{
+  "Name": "QFN",
+  "Family": "Qfn",
+  "MinPads": 8,
+  "MaxPads": 100,
+  "MinRows": 3,
+  "MaxRows": 30,
+  "MinColumns": 3,
+  "MaxColumns": 30,
+  "MinPitch": 0.25,
+  "MaxPitch": 1,
+  "MinOccupancy": 0.15,
+  "MaxOccupancy": 0.75,
+  "MinSymmetry": 0.65,
+  "MinAspectRatio": 0.75,
+  "MaxAspectRatio": 1.35,
+  "RequiresSquareMatrix": false,
+  "RequiresTwoRows": false,
+  "RequiresFourSides": true,
+  "AcceptanceScore": 0.7,
+  "Priority": 85
+}
