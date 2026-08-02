@@ -10,13 +10,12 @@ namespace BoardView.Rendering.Geometry;
 /// Cada píxel de la imagen original se clasifica como:
 ///
 /// <list type="bullet">
-/// <item><c>0</c>: fondo.</item>
-/// <item><c>1</c>: geometría.</item>
+/// <item><c>0</c>: fondo o contenido cromático descartado.</item>
+/// <item><c>1</c>: geometría oscura y cromáticamente neutra.</item>
 /// </list>
 ///
-/// La máscara utiliza un byte por píxel para mantener un acceso directo,
-/// predecible y compatible con futuras operaciones de análisis,
-/// recorte, contornos y componentes conectados.
+/// La máscara utiliza un byte por píxel para mantener acceso directo y
+/// compatibilidad con futuras operaciones de contornos y componentes.
 /// </remarks>
 public sealed class BoardGeometryMask
 {
@@ -25,18 +24,6 @@ public sealed class BoardGeometryMask
 
     private readonly byte[] _data;
 
-    /// <summary>
-    /// Inicializa una máscara binaria a partir de datos ya clasificados.
-    /// </summary>
-    /// <param name="width">Ancho de la máscara en píxeles.</param>
-    /// <param name="height">Alto de la máscara en píxeles.</param>
-    /// <param name="data">
-    /// Datos binarios organizados por filas. Cada elemento debe ser
-    /// <c>0</c> para fondo o <c>1</c> para geometría.
-    /// </param>
-    /// <param name="geometryPixelCount">
-    /// Cantidad total de píxeles clasificados como geometría.
-    /// </param>
     private BoardGeometryMask(
         int width,
         int height,
@@ -77,15 +64,11 @@ public sealed class BoardGeometryMask
     /// <summary>
     /// Obtiene el valor binario almacenado en una coordenada.
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">
-    /// La coordenada se encuentra fuera de la máscara.
-    /// </exception>
     public byte this[int x, int y]
     {
         get
         {
             ValidateCoordinates(x, y);
-
             return _data[GetOffsetUnchecked(x, y)];
         }
     }
@@ -93,22 +76,20 @@ public sealed class BoardGeometryMask
     /// <summary>
     /// Crea una máscara binaria a partir de una imagen BGRA32.
     /// </summary>
-    /// <param name="pixelData">
-    /// Píxeles de la imagen en formato BGRA32.
-    /// </param>
-    /// <param name="pixelWidth">Ancho de la imagen en píxeles.</param>
-    /// <param name="pixelHeight">Alto de la imagen en píxeles.</param>
-    /// <param name="stride">Cantidad de bytes ocupada por cada fila.</param>
+    /// <param name="pixelData">Píxeles BGRA32.</param>
+    /// <param name="pixelWidth">Ancho de la imagen.</param>
+    /// <param name="pixelHeight">Alto de la imagen.</param>
+    /// <param name="stride">Cantidad de bytes por fila.</param>
     /// <param name="darkChannelThreshold">
-    /// Valor máximo permitido para el canal RGB más oscuro de un píxel.
-    /// Los valores más bajos conservan únicamente trazos más oscuros.
+    /// Valor máximo permitido para el canal RGB más claro.
     /// </param>
     /// <param name="minimumAlpha">
-    /// Canal alfa mínimo requerido para considerar visible un píxel.
+    /// Canal alfa mínimo considerado visible.
     /// </param>
-    /// <returns>
-    /// Máscara binaria independiente del búfer de imagen original.
-    /// </returns>
+    /// <param name="maximumChannelDifference">
+    /// Diferencia máxima permitida entre el canal RGB más claro y el más
+    /// oscuro.
+    /// </param>
     public static BoardGeometryMask CreateFromBgra32(
         byte[] pixelData,
         int pixelWidth,
@@ -117,7 +98,9 @@ public sealed class BoardGeometryMask
         byte darkChannelThreshold =
             BoardGeometryAnalyzer.DefaultDarkChannelThreshold,
         byte minimumAlpha =
-            BoardGeometryAnalyzer.DefaultMinimumAlpha)
+            BoardGeometryAnalyzer.DefaultMinimumAlpha,
+        byte maximumChannelDifference =
+            BoardGeometryAnalyzer.DefaultMaximumChannelDifference)
     {
         ArgumentNullException.ThrowIfNull(pixelData);
 
@@ -132,7 +115,6 @@ public sealed class BoardGeometryMask
             pixelHeight);
 
         var maskData = new byte[maskLength];
-
         long geometryPixelCount = 0L;
 
         for (int y = 0; y < pixelHeight; y++)
@@ -157,7 +139,8 @@ public sealed class BoardGeometryMask
                         red,
                         alpha,
                         darkChannelThreshold,
-                        minimumAlpha))
+                        minimumAlpha,
+                        maximumChannelDifference))
                 {
                     continue;
                 }
@@ -179,9 +162,6 @@ public sealed class BoardGeometryMask
     /// <summary>
     /// Indica si una coordenada contiene geometría.
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">
-    /// La coordenada se encuentra fuera de la máscara.
-    /// </exception>
     public bool IsGeometry(int x, int y)
     {
         return this[x, y] == GeometryValue;
@@ -190,17 +170,13 @@ public sealed class BoardGeometryMask
     /// <summary>
     /// Indica si una coordenada pertenece al fondo.
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">
-    /// La coordenada se encuentra fuera de la máscara.
-    /// </exception>
     public bool IsBackground(int x, int y)
     {
         return this[x, y] == BackgroundValue;
     }
 
     /// <summary>
-    /// Intenta obtener el valor binario de una coordenada sin lanzar
-    /// una excepción cuando está fuera de los límites.
+    /// Intenta obtener el valor binario de una coordenada.
     /// </summary>
     public bool TryGetValue(
         int x,
@@ -221,10 +197,6 @@ public sealed class BoardGeometryMask
     /// <summary>
     /// Devuelve una copia independiente de los datos binarios.
     /// </summary>
-    /// <remarks>
-    /// La copia evita que código externo pueda modificar el estado
-    /// interno de la máscara.
-    /// </remarks>
     public byte[] ToArray()
     {
         return (byte[])_data.Clone();
@@ -233,10 +205,6 @@ public sealed class BoardGeometryMask
     /// <summary>
     /// Enumera las coordenadas clasificadas como geometría.
     /// </summary>
-    /// <remarks>
-    /// Este método evita asignaciones adicionales para píxeles de fondo,
-    /// pero puede recorrer toda la máscara.
-    /// </remarks>
     public IEnumerable<BoardGeometryPoint> EnumerateGeometryPixels()
     {
         for (int y = 0; y < Height; y++)
@@ -256,7 +224,7 @@ public sealed class BoardGeometryMask
     }
 
     /// <summary>
-    /// Determina si un píxel BGRA32 pertenece a la geometría útil.
+    /// Determina si un píxel BGRA32 es oscuro y cromáticamente neutro.
     /// </summary>
     private static bool IsGeometryPixel(
         byte blue,
@@ -264,7 +232,8 @@ public sealed class BoardGeometryMask
         byte red,
         byte alpha,
         byte darkChannelThreshold,
-        byte minimumAlpha)
+        byte minimumAlpha,
+        byte maximumChannelDifference)
     {
         if (alpha < minimumAlpha)
         {
@@ -276,12 +245,23 @@ public sealed class BoardGeometryMask
                 red,
                 Math.Min(green, blue));
 
-        return darkestChannel <= darkChannelThreshold;
+        byte lightestChannel =
+            Math.Max(
+                red,
+                Math.Max(green, blue));
+
+        if (lightestChannel > darkChannelThreshold)
+        {
+            return false;
+        }
+
+        int channelDifference =
+            lightestChannel -
+            darkestChannel;
+
+        return channelDifference <= maximumChannelDifference;
     }
 
-    /// <summary>
-    /// Obtiene la posición lineal de una coordenada ya validada.
-    /// </summary>
     private int GetOffsetUnchecked(int x, int y)
     {
         return checked(
@@ -289,9 +269,6 @@ public sealed class BoardGeometryMask
             x);
     }
 
-    /// <summary>
-    /// Valida una coordenada de la máscara.
-    /// </summary>
     private void ValidateCoordinates(int x, int y)
     {
         if ((uint)x >= (uint)Width)
@@ -311,9 +288,6 @@ public sealed class BoardGeometryMask
         }
     }
 
-    /// <summary>
-    /// Valida el contrato de memoria de una imagen BGRA32.
-    /// </summary>
     private static void ValidateImageArguments(
         byte[] pixelData,
         int pixelWidth,

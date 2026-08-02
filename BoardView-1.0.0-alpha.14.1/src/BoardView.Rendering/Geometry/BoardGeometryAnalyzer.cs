@@ -9,18 +9,31 @@ namespace BoardView.Rendering.Geometry;
 /// <remarks>
 /// El analizador no modifica la imagen original.
 ///
-/// Para reducir falsos positivos provocados por fondos blancos y marcas
-/// de agua claras, un píxel se considera geometría únicamente cuando su
-/// canal alfa es visible y su canal RGB más oscuro no supera el umbral
-/// configurado.
+/// Para evitar que marcas de agua rojas, enlaces azules u otros elementos
+/// cromáticos amplíen artificialmente los límites, un píxel solo se
+/// considera geometría cuando:
+///
+/// <list type="bullet">
+/// <item>su canal alfa es visible;</item>
+/// <item>todos sus canales RGB son suficientemente oscuros;</item>
+/// <item>la diferencia entre sus canales RGB no supera el límite de neutralidad.</item>
+/// </list>
+///
+/// Esta clasificación conserva trazos negros y grises y descarta colores
+/// saturados, aunque alguno de sus canales individuales sea oscuro.
 /// </remarks>
 public sealed class BoardGeometryAnalyzer
 {
     /// <summary>
-    /// Umbral predeterminado utilizado para separar líneas oscuras de
-    /// fondos y marcas de agua claras.
+    /// Umbral predeterminado aplicado al canal RGB más claro.
     /// </summary>
     public const byte DefaultDarkChannelThreshold = 190;
+
+    /// <summary>
+    /// Diferencia máxima predeterminada permitida entre el canal RGB más
+    /// claro y el más oscuro.
+    /// </summary>
+    public const byte DefaultMaximumChannelDifference = 48;
 
     /// <summary>
     /// Canal alfa mínimo considerado visible.
@@ -33,30 +46,53 @@ public sealed class BoardGeometryAnalyzer
     public BoardGeometryAnalyzer()
         : this(
             DefaultDarkChannelThreshold,
-            DefaultMinimumAlpha)
+            DefaultMinimumAlpha,
+            DefaultMaximumChannelDifference)
     {
     }
 
     /// <summary>
-    /// Inicializa el analizador con umbrales explícitos.
+    /// Inicializa el analizador con umbrales de oscuridad y alfa.
+    /// </summary>
+    /// <remarks>
+    /// La neutralidad cromática utiliza
+    /// <see cref="DefaultMaximumChannelDifference"/>.
+    /// </remarks>
+    public BoardGeometryAnalyzer(
+        byte darkChannelThreshold,
+        byte minimumAlpha)
+        : this(
+            darkChannelThreshold,
+            minimumAlpha,
+            DefaultMaximumChannelDifference)
+    {
+    }
+
+    /// <summary>
+    /// Inicializa el analizador con todos los umbrales explícitos.
     /// </summary>
     /// <param name="darkChannelThreshold">
-    /// Valor máximo permitido para el canal RGB más oscuro de un píxel.
-    /// Los valores bajos seleccionan únicamente trazos más oscuros.
+    /// Valor máximo permitido para el canal RGB más claro.
     /// </param>
     /// <param name="minimumAlpha">
     /// Canal alfa mínimo requerido para considerar visible un píxel.
     /// </param>
+    /// <param name="maximumChannelDifference">
+    /// Diferencia máxima permitida entre el canal RGB más claro y el más
+    /// oscuro. Los valores pequeños aceptan únicamente tonos más neutros.
+    /// </param>
     public BoardGeometryAnalyzer(
         byte darkChannelThreshold,
-        byte minimumAlpha)
+        byte minimumAlpha,
+        byte maximumChannelDifference)
     {
         DarkChannelThreshold = darkChannelThreshold;
         MinimumAlpha = minimumAlpha;
+        MaximumChannelDifference = maximumChannelDifference;
     }
 
     /// <summary>
-    /// Obtiene el umbral aplicado al canal RGB más oscuro.
+    /// Obtiene el umbral aplicado al canal RGB más claro.
     /// </summary>
     public byte DarkChannelThreshold { get; }
 
@@ -66,19 +102,14 @@ public sealed class BoardGeometryAnalyzer
     public byte MinimumAlpha { get; }
 
     /// <summary>
+    /// Obtiene la diferencia máxima permitida entre canales RGB.
+    /// </summary>
+    public byte MaximumChannelDifference { get; }
+
+    /// <summary>
     /// Calcula el rectángulo mínimo que contiene los píxeles clasificados
     /// como geometría de placa.
     /// </summary>
-    /// <param name="pixelData">
-    /// Píxeles de la imagen en formato BGRA32.
-    /// </param>
-    /// <param name="pixelWidth">Ancho de la imagen en píxeles.</param>
-    /// <param name="pixelHeight">Alto de la imagen en píxeles.</param>
-    /// <param name="stride">Cantidad de bytes ocupada por cada fila.</param>
-    /// <returns>
-    /// Resultado del análisis. Cuando no se detecta geometría,
-    /// <see cref="BoardGeometryAnalysisResult.HasGeometry"/> es falso.
-    /// </returns>
     public BoardGeometryAnalysisResult Analyze(
         byte[] pixelData,
         int pixelWidth,
@@ -182,7 +213,21 @@ public sealed class BoardGeometryAnalyzer
                 red,
                 Math.Min(green, blue));
 
-        return darkestChannel <= DarkChannelThreshold;
+        byte lightestChannel =
+            Math.Max(
+                red,
+                Math.Max(green, blue));
+
+        if (lightestChannel > DarkChannelThreshold)
+        {
+            return false;
+        }
+
+        int channelDifference =
+            lightestChannel -
+            darkestChannel;
+
+        return channelDifference <= MaximumChannelDifference;
     }
 
     /// <summary>
