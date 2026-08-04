@@ -22,6 +22,8 @@ public sealed class SchematicElectricalGraphBuilder
     private readonly SchematicEndpointTopologyBuilder endpointTopologyBuilder;
     private readonly SchematicJunctionBuilder junctionBuilder;
     private readonly SchematicNetBuilder netBuilder;
+    private readonly SchematicNetLabelBuilder netLabelBuilder;
+    private readonly SchematicNetMergeBuilder netMergeBuilder;
 
     public SchematicElectricalGraphBuilder()
         : this(
@@ -32,7 +34,9 @@ public sealed class SchematicElectricalGraphBuilder
             new SchematicNetSegmentAssembler(),
             new SchematicEndpointTopologyBuilder(),
             new SchematicJunctionBuilder(),
-            new SchematicNetBuilder())
+            new SchematicNetBuilder(),
+            new SchematicNetLabelBuilder(),
+            new SchematicNetMergeBuilder())
     {
     }
 
@@ -46,7 +50,9 @@ public sealed class SchematicElectricalGraphBuilder
             new SchematicNetSegmentAssembler(),
             new SchematicEndpointTopologyBuilder(),
             new SchematicJunctionBuilder(),
-            new SchematicNetBuilder())
+            new SchematicNetBuilder(),
+            new SchematicNetLabelBuilder(),
+            new SchematicNetMergeBuilder())
     {
     }
 
@@ -61,7 +67,9 @@ public sealed class SchematicElectricalGraphBuilder
             new SchematicNetSegmentAssembler(),
             new SchematicEndpointTopologyBuilder(),
             new SchematicJunctionBuilder(),
-            new SchematicNetBuilder())
+            new SchematicNetBuilder(),
+            new SchematicNetLabelBuilder(),
+            new SchematicNetMergeBuilder())
     {
     }
 
@@ -77,7 +85,9 @@ public sealed class SchematicElectricalGraphBuilder
             new SchematicNetSegmentAssembler(),
             new SchematicEndpointTopologyBuilder(),
             new SchematicJunctionBuilder(),
-            new SchematicNetBuilder())
+            new SchematicNetBuilder(),
+            new SchematicNetLabelBuilder(),
+            new SchematicNetMergeBuilder())
     {
     }
 
@@ -94,7 +104,9 @@ public sealed class SchematicElectricalGraphBuilder
             new SchematicNetSegmentAssembler(),
             new SchematicEndpointTopologyBuilder(),
             junctionBuilder,
-            new SchematicNetBuilder())
+            new SchematicNetBuilder(),
+            new SchematicNetLabelBuilder(),
+            new SchematicNetMergeBuilder())
     {
     }
 
@@ -112,7 +124,9 @@ public sealed class SchematicElectricalGraphBuilder
             new SchematicNetSegmentAssembler(),
             new SchematicEndpointTopologyBuilder(),
             junctionBuilder,
-            netBuilder)
+            netBuilder,
+            new SchematicNetLabelBuilder(),
+            new SchematicNetMergeBuilder())
     {
     }
 
@@ -124,7 +138,9 @@ public sealed class SchematicElectricalGraphBuilder
         SchematicNetSegmentAssembler netSegmentAssembler,
         SchematicEndpointTopologyBuilder endpointTopologyBuilder,
         SchematicJunctionBuilder junctionBuilder,
-        SchematicNetBuilder netBuilder)
+        SchematicNetBuilder netBuilder,
+        SchematicNetLabelBuilder netLabelBuilder,
+        SchematicNetMergeBuilder netMergeBuilder)
     {
         this.primitiveClassifier =
             primitiveClassifier ??
@@ -157,6 +173,14 @@ public sealed class SchematicElectricalGraphBuilder
         this.netBuilder =
             netBuilder ??
             throw new ArgumentNullException(nameof(netBuilder));
+
+        this.netLabelBuilder =
+            netLabelBuilder ??
+            throw new ArgumentNullException(nameof(netLabelBuilder));
+
+        this.netMergeBuilder =
+            netMergeBuilder ??
+            throw new ArgumentNullException(nameof(netMergeBuilder));
     }
 
     /// <summary>
@@ -167,6 +191,7 @@ public sealed class SchematicElectricalGraphBuilder
     {
         return Build(
             geometryIndex,
+            Array.Empty<BoardTextObservation>(),
             SchematicElectricalGraphBuilderOptions.Default,
             CancellationToken.None);
     }
@@ -179,7 +204,21 @@ public sealed class SchematicElectricalGraphBuilder
         SchematicElectricalGraphBuilderOptions options,
         CancellationToken cancellationToken)
     {
+        return Build(
+            geometryIndex,
+            Array.Empty<BoardTextObservation>(),
+            options,
+            cancellationToken);
+    }
+
+    public SchematicElectricalGraph Build(
+        BoardGeometryIndex geometryIndex,
+        IReadOnlyList<BoardTextObservation> textObservations,
+        SchematicElectricalGraphBuilderOptions options,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(geometryIndex);
+        ArgumentNullException.ThrowIfNull(textObservations);
         ArgumentNullException.ThrowIfNull(options);
 
         options.Validate();
@@ -219,6 +258,18 @@ public sealed class SchematicElectricalGraphBuilder
                 .OrderBy(node => node.Id)
                 .ToArray();
 
+        SchematicNetLabelBuildResult netLabels =
+            netLabelBuilder.Build(
+                nodes,
+                textObservations,
+                cancellationToken);
+
+        nodes =
+            nodes
+                .Concat(netLabels.Nodes)
+                .OrderBy(node => node.Id)
+                .ToArray();
+
         var nodesById =
             nodes.ToDictionary(
                 node => node.Id);
@@ -228,6 +279,9 @@ public sealed class SchematicElectricalGraphBuilder
 
         var edges =
             new List<SchematicElectricalEdge>();
+
+        edges.AddRange(
+            netLabels.Edges);
 
         foreach (SchematicElectricalNode node in nodes)
         {
@@ -299,6 +353,15 @@ public sealed class SchematicElectricalGraphBuilder
                         evaluation.ContactY));
             }
         }
+
+        IReadOnlyList<SchematicElectricalEdge> semanticNetEdges =
+            netMergeBuilder.Build(
+                nodes,
+                edges,
+                cancellationToken);
+
+        edges.AddRange(
+            semanticNetEdges);
 
         IReadOnlyList<SchematicElectricalEdge> normalizedEdges =
             NormalizeTopology(
