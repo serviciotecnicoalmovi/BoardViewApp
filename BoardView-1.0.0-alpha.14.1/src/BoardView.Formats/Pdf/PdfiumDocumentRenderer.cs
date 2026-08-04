@@ -11,14 +11,31 @@ namespace BoardView.Formats.Pdf;
 /// </summary>
 /// <remarks>
 /// Cada instancia mantiene abierto un único documento PDF.
-/// La clase es segura para llamadas concurrentes porque serializa
-/// el acceso al documento nativo mediante un bloqueo interno.
+///
+/// La sincronización se realiza en dos niveles:
+///
+/// <list type="bullet">
+/// <item>
+/// Un bloqueo por instancia impide que el documento sea liberado mientras
+/// otro método de la misma instancia todavía lo está utilizando.
+/// </item>
+/// <item>
+/// <see cref="PdfiumNativeExecutionGate"/> serializa globalmente todas las
+/// llamadas nativas de PDFium realizadas por renderizadores e indexadores.
+/// </item>
+/// </list>
 /// </remarks>
 public sealed class PdfiumDocumentRenderer : IDisposable
 {
     private const int RenderAnnotationsFlag = 0x01;
     private const int RenderLcdTextFlag = 0x02;
 
+    /*
+     * Protege exclusivamente el estado administrado de esta instancia:
+     * _document y _disposed.
+     *
+     * No sustituye la compuerta global de PDFium.
+     */
     private readonly object _syncRoot = new();
 
     private IntPtr _document;
@@ -39,45 +56,43 @@ public sealed class PdfiumDocumentRenderer : IDisposable
     /// <exception cref="InvalidOperationException">
     /// PDFium no pudo abrir el documento.
     /// </exception>
-    public PdfiumDocumentRenderer(string filePath)
+    public PdfiumDocumentRenderer(
+        string filePath)
     {
-        if (string.IsNullOrWhiteSpace(filePath))
+        if (string.IsNullOrWhiteSpace(
+                filePath))
         {
             throw new ArgumentException(
                 "La ruta del documento PDF no puede estar vacía.",
                 nameof(filePath));
         }
 
-        string absolutePath = Path.GetFullPath(filePath);
+        string absolutePath =
+            Path.GetFullPath(
+                filePath);
 
-        if (!File.Exists(absolutePath))
+        if (!File.Exists(
+                absolutePath))
         {
             throw new FileNotFoundException(
                 "No se encontró el documento PDF.",
                 absolutePath);
         }
 
-        PdfiumRuntime.EnsureInitialized();
+        /*
+         * Inicialización, apertura y consulta del número de páginas forman una
+         * sola operación nativa exclusiva.
+         */
+        (IntPtr Document, int PageCount) openedDocument =
+            PdfiumNativeExecutionGate.Run(
+                () => OpenDocument(
+                    absolutePath));
 
-        _document = LoadDocument(absolutePath);
+        _document =
+            openedDocument.Document;
 
-        if (_document == IntPtr.Zero)
-        {
-            uint errorCode = PdfiumNative.GetLastError();
-
-            throw new InvalidOperationException(
-                $"PDFium no pudo abrir el documento. Código de error: {errorCode}.");
-        }
-
-        PageCount = PdfiumNative.GetPageCount(_document);
-
-        if (PageCount <= 0)
-        {
-            Dispose();
-
-            throw new InvalidOperationException(
-                "El documento PDF no contiene páginas renderizables.");
-        }
+        PageCount =
+            openedDocument.PageCount;
     }
 
     /// <summary>
@@ -91,39 +106,18 @@ public sealed class PdfiumDocumentRenderer : IDisposable
     /// <param name="pageIndex">
     /// Índice de página basado en cero.
     /// </param>
-    public PdfiumPageSize GetPageSize(int pageIndex)
+    public PdfiumPageSize GetPageSize(
+        int pageIndex)
     {
         lock (_syncRoot)
         {
             ThrowIfDisposed();
-            ValidatePageIndex(pageIndex);
-
-            IntPtr page = PdfiumNative.LoadPage(
-                _document,
+            ValidatePageIndex(
                 pageIndex);
 
-            if (page == IntPtr.Zero)
-            {
-                throw CreatePageLoadException(pageIndex);
-            }
-
-            try
-            {
-                double width = PdfiumNative.GetPageWidth(page);
-                double height = PdfiumNative.GetPageHeight(page);
-
-                if (width <= 0D || height <= 0D)
-                {
-                    throw new InvalidOperationException(
-                        $"La página {pageIndex} tiene dimensiones no válidas.");
-                }
-
-                return new PdfiumPageSize(width, height);
-            }
-            finally
-            {
-                PdfiumNative.ClosePage(page);
-            }
+            return PdfiumNativeExecutionGate.Run(
+                () => GetPageSizeCore(
+                    pageIndex));
         }
     }
 
@@ -181,111 +175,19 @@ public sealed class PdfiumDocumentRenderer : IDisposable
         lock (_syncRoot)
         {
             ThrowIfDisposed();
+
             cancellationToken.ThrowIfCancellationRequested();
 
-            IntPtr page = PdfiumNative.LoadPage(
-                _document,
-                pageIndex);
-
-            if (page == IntPtr.Zero)
-            {
-                throw CreatePageLoadException(pageIndex);
-            }
-
-            IntPtr bitmap = IntPtr.Zero;
-
-            try
-            {
-                bitmap = PdfiumNative.CreateBitmap(
+            return PdfiumNativeExecutionGate.Run(
+                () => RenderRegionCore(
+                    pageIndex,
+                    pagePixelWidth,
+                    pagePixelHeight,
+                    regionX,
+                    regionY,
                     regionWidth,
                     regionHeight,
-                    alpha: 1);
-
-                if (bitmap == IntPtr.Zero)
-                {
-                    throw new InvalidOperationException(
-                        "PDFium no pudo crear el bitmap de renderizado.");
-                }
-
-                /*
-                 * Fondo blanco opaco en formato ARGB.
-                 */
-                int fillResult =
-                    PdfiumNative.FillBitmapRectangle(
-                        bitmap,
-                        left: 0,
-                        top: 0,
-                        width: regionWidth,
-                        height: regionHeight,
-                        color: 0xFFFFFFFF);
-
-                if (fillResult == 0)
-                {
-                    throw new InvalidOperationException(
-                        "PDFium no pudo limpiar el bitmap de renderizado.");
-                }
-
-                /*
-                 * La página completa se desplaza en sentido contrario
-                 * a la región solicitada. Solo la parte visible cae
-                 * dentro del pequeño bitmap de la tesela.
-                 */
-                PdfiumNative.RenderPageBitmap(
-                    bitmap,
-                    page,
-                    startX: -regionX,
-                    startY: -regionY,
-                    sizeX: pagePixelWidth,
-                    sizeY: pagePixelHeight,
-                    rotate: 0,
-                    flags: RenderAnnotationsFlag | RenderLcdTextFlag);
-
-                cancellationToken.ThrowIfCancellationRequested();
-
-                IntPtr buffer =
-                    PdfiumNative.GetBitmapBuffer(bitmap);
-
-                int stride =
-                    PdfiumNative.GetBitmapStride(bitmap);
-
-                if (buffer == IntPtr.Zero)
-                {
-                    throw new InvalidOperationException(
-                        "PDFium devolvió un búfer de imagen nulo.");
-                }
-
-                if (stride <= 0)
-                {
-                    throw new InvalidOperationException(
-                        "PDFium devolvió un stride no válido.");
-                }
-
-                int byteCount = checked(stride * regionHeight);
-                byte[] pixels = new byte[byteCount];
-
-                Marshal.Copy(
-                    buffer,
-                    pixels,
-                    startIndex: 0,
-                    length: byteCount);
-
-                cancellationToken.ThrowIfCancellationRequested();
-
-                return new PdfiumRenderResult(
-                    regionWidth,
-                    regionHeight,
-                    stride,
-                    pixels);
-            }
-            finally
-            {
-                if (bitmap != IntPtr.Zero)
-                {
-                    PdfiumNative.DestroyBitmap(bitmap);
-                }
-
-                PdfiumNative.ClosePage(page);
-            }
+                    cancellationToken));
         }
     }
 
@@ -301,25 +203,295 @@ public sealed class PdfiumDocumentRenderer : IDisposable
                 return;
             }
 
-            if (_document != IntPtr.Zero)
-            {
-                PdfiumNative.CloseDocument(_document);
-                _document = IntPtr.Zero;
-            }
+            /*
+             * El documento se cierra bajo la misma compuerta que protege
+             * LoadPage, RenderPageBitmap y la indexación textual.
+             */
+            PdfiumNativeExecutionGate.Run(
+                CloseDocumentCore);
 
-            _disposed = true;
+            _disposed =
+                true;
         }
 
-        GC.SuppressFinalize(this);
+        GC.SuppressFinalize(
+            this);
     }
 
-    private static IntPtr LoadDocument(string absolutePath)
+    /// <summary>
+    /// Inicializa PDFium, abre el documento y valida su número de páginas.
+    /// </summary>
+    private static (IntPtr Document, int PageCount) OpenDocument(
+        string absolutePath)
+    {
+        PdfiumRuntime.EnsureInitialized();
+
+        IntPtr document =
+            LoadDocument(
+                absolutePath);
+
+        if (document == IntPtr.Zero)
+        {
+            uint errorCode =
+                PdfiumNative.GetLastError();
+
+            throw new InvalidOperationException(
+                "PDFium no pudo abrir el documento. " +
+                $"Código de error: {errorCode}.");
+        }
+
+        try
+        {
+            int pageCount =
+                PdfiumNative.GetPageCount(
+                    document);
+
+            if (pageCount <= 0)
+            {
+                throw new InvalidOperationException(
+                    "El documento PDF no contiene páginas renderizables.");
+            }
+
+            return (
+                document,
+                pageCount);
+        }
+        catch
+        {
+            PdfiumNative.CloseDocument(
+                document);
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Obtiene el tamaño de una página. El llamador debe poseer la compuerta
+    /// global de PDFium.
+    /// </summary>
+    private PdfiumPageSize GetPageSizeCore(
+        int pageIndex)
+    {
+        IntPtr page =
+            PdfiumNative.LoadPage(
+                _document,
+                pageIndex);
+
+        if (page == IntPtr.Zero)
+        {
+            throw CreatePageLoadException(
+                pageIndex);
+        }
+
+        try
+        {
+            double width =
+                PdfiumNative.GetPageWidth(
+                    page);
+
+            double height =
+                PdfiumNative.GetPageHeight(
+                    page);
+
+            if (!double.IsFinite(width) ||
+                !double.IsFinite(height) ||
+                width <= 0D ||
+                height <= 0D)
+            {
+                throw new InvalidOperationException(
+                    $"La página {pageIndex} tiene dimensiones no válidas.");
+            }
+
+            return new PdfiumPageSize(
+                width,
+                height);
+        }
+        finally
+        {
+            PdfiumNative.ClosePage(
+                page);
+        }
+    }
+
+    /// <summary>
+    /// Renderiza una región. El llamador debe poseer la compuerta global de
+    /// PDFium durante toda la vida de la página y del bitmap.
+    /// </summary>
+    private PdfiumRenderResult RenderRegionCore(
+        int pageIndex,
+        int pagePixelWidth,
+        int pagePixelHeight,
+        int regionX,
+        int regionY,
+        int regionWidth,
+        int regionHeight,
+        CancellationToken cancellationToken)
+    {
+        IntPtr page =
+            PdfiumNative.LoadPage(
+                _document,
+                pageIndex);
+
+        if (page == IntPtr.Zero)
+        {
+            throw CreatePageLoadException(
+                pageIndex);
+        }
+
+        IntPtr bitmap =
+            IntPtr.Zero;
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            bitmap =
+                PdfiumNative.CreateBitmap(
+                    regionWidth,
+                    regionHeight,
+                    alpha: 1);
+
+            if (bitmap == IntPtr.Zero)
+            {
+                throw new InvalidOperationException(
+                    "PDFium no pudo crear el bitmap de renderizado.");
+            }
+
+            /*
+             * Fondo blanco opaco en formato ARGB.
+             */
+            int fillResult =
+                PdfiumNative.FillBitmapRectangle(
+                    bitmap,
+                    left: 0,
+                    top: 0,
+                    width: regionWidth,
+                    height: regionHeight,
+                    color: 0xFFFFFFFF);
+
+            if (fillResult == 0)
+            {
+                throw new InvalidOperationException(
+                    "PDFium no pudo limpiar el bitmap de renderizado.");
+            }
+
+            /*
+             * La página completa se desplaza en sentido contrario a la región
+             * solicitada. Solo la parte visible cae dentro del bitmap pequeño.
+             */
+            PdfiumNative.RenderPageBitmap(
+                bitmap,
+                page,
+                startX: -regionX,
+                startY: -regionY,
+                sizeX: pagePixelWidth,
+                sizeY: pagePixelHeight,
+                rotate: 0,
+                flags:
+                    RenderAnnotationsFlag |
+                    RenderLcdTextFlag);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            IntPtr buffer =
+                PdfiumNative.GetBitmapBuffer(
+                    bitmap);
+
+            int stride =
+                PdfiumNative.GetBitmapStride(
+                    bitmap);
+
+            if (buffer == IntPtr.Zero)
+            {
+                throw new InvalidOperationException(
+                    "PDFium devolvió un búfer de imagen nulo.");
+            }
+
+            if (stride <= 0)
+            {
+                throw new InvalidOperationException(
+                    "PDFium devolvió un stride no válido.");
+            }
+
+            int byteCount =
+                checked(
+                    stride *
+                    regionHeight);
+
+            byte[] pixels =
+                new byte[byteCount];
+
+            Marshal.Copy(
+                buffer,
+                pixels,
+                startIndex: 0,
+                length: byteCount);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            return new PdfiumRenderResult(
+                regionWidth,
+                regionHeight,
+                stride,
+                pixels);
+        }
+        finally
+        {
+            /*
+             * Los recursos dependientes se liberan en orden inverso.
+             */
+            if (bitmap != IntPtr.Zero)
+            {
+                PdfiumNative.DestroyBitmap(
+                    bitmap);
+
+                bitmap =
+                    IntPtr.Zero;
+            }
+
+            if (page != IntPtr.Zero)
+            {
+                PdfiumNative.ClosePage(
+                    page);
+
+                page =
+                    IntPtr.Zero;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cierra el documento de esta instancia. El llamador debe poseer la
+    /// compuerta global.
+    /// </summary>
+    private void CloseDocumentCore()
+    {
+        if (_document == IntPtr.Zero)
+        {
+            return;
+        }
+
+        PdfiumNative.CloseDocument(
+            _document);
+
+        _document =
+            IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Abre un documento utilizando una ruta UTF-8 terminada en cero.
+    /// </summary>
+    private static IntPtr LoadDocument(
+        string absolutePath)
     {
         byte[] pathBytes =
-            Encoding.UTF8.GetBytes(absolutePath + '\0');
+            Encoding.UTF8.GetBytes(
+                absolutePath +
+                '\0');
 
-        IntPtr pathPointer = Marshal.AllocHGlobal(
-            pathBytes.Length);
+        IntPtr pathPointer =
+            Marshal.AllocHGlobal(
+                pathBytes.Length);
 
         try
         {
@@ -335,7 +507,8 @@ public sealed class PdfiumDocumentRenderer : IDisposable
         }
         finally
         {
-            Marshal.FreeHGlobal(pathPointer);
+            Marshal.FreeHGlobal(
+                pathPointer);
         }
     }
 
@@ -348,7 +521,8 @@ public sealed class PdfiumDocumentRenderer : IDisposable
         int regionWidth,
         int regionHeight)
     {
-        ValidatePageIndex(pageIndex);
+        ValidatePageIndex(
+            pageIndex);
 
         if (pagePixelWidth <= 0)
         {
@@ -406,17 +580,21 @@ public sealed class PdfiumDocumentRenderer : IDisposable
                 "La región comienza fuera de la página.");
         }
 
-        if ((long)regionX + regionWidth > pagePixelWidth ||
-            (long)regionY + regionHeight > pagePixelHeight)
+        if ((long)regionX + regionWidth >
+                pagePixelWidth ||
+            (long)regionY + regionHeight >
+                pagePixelHeight)
         {
             throw new ArgumentException(
                 "La región solicitada excede los límites de la página.");
         }
     }
 
-    private void ValidatePageIndex(int pageIndex)
+    private void ValidatePageIndex(
+        int pageIndex)
     {
-        if (pageIndex < 0 || pageIndex >= PageCount)
+        if (pageIndex < 0 ||
+            pageIndex >= PageCount)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(pageIndex),
@@ -428,7 +606,8 @@ public sealed class PdfiumDocumentRenderer : IDisposable
     private static InvalidOperationException CreatePageLoadException(
         int pageIndex)
     {
-        uint errorCode = PdfiumNative.GetLastError();
+        uint errorCode =
+            PdfiumNative.GetLastError();
 
         return new InvalidOperationException(
             $"PDFium no pudo cargar la página {pageIndex}. " +
@@ -464,7 +643,8 @@ public sealed class PdfiumRenderResult
         int stride,
         byte[] pixelData)
     {
-        ArgumentNullException.ThrowIfNull(pixelData);
+        ArgumentNullException.ThrowIfNull(
+            pixelData);
 
         if (pixelWidth <= 0)
         {
@@ -478,14 +658,18 @@ public sealed class PdfiumRenderResult
                 nameof(pixelHeight));
         }
 
-        if (stride < pixelWidth * PdfiumNative.BytesPerPixel)
+        if (stride <
+            pixelWidth *
+            PdfiumNative.BytesPerPixel)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(stride));
         }
 
         int expectedLength =
-            checked(stride * pixelHeight);
+            checked(
+                stride *
+                pixelHeight);
 
         if (pixelData.Length != expectedLength)
         {
@@ -494,10 +678,17 @@ public sealed class PdfiumRenderResult
                 nameof(pixelData));
         }
 
-        PixelWidth = pixelWidth;
-        PixelHeight = pixelHeight;
-        Stride = stride;
-        PixelData = pixelData;
+        PixelWidth =
+            pixelWidth;
+
+        PixelHeight =
+            pixelHeight;
+
+        Stride =
+            stride;
+
+        PixelData =
+            pixelData;
     }
 
     /// <summary>

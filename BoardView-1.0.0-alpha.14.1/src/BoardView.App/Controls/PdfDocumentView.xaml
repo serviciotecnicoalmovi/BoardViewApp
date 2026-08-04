@@ -7,37 +7,143 @@
              xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
              Background="#0B1118">
   <Grid>
+    <ScrollViewer x:Name="GeometryScrollViewer"
+                  HorizontalScrollBarVisibility="Auto"
+                  VerticalScrollBarVisibility="Auto"
+                  Background="#0B1118"
+                  Visibility="Collapsed">
+      <Border Padding="20"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              Background="#0B1118">
+        <Grid>
+          <Image x:Name="GeometryImage"
+                 Stretch="None"
+                 SnapsToDevicePixels="True"
+                 RenderOptions.BitmapScalingMode="HighQuality"
+                 MouseMove="OnGeometryImageMouseMove"
+                 MouseLeave="OnGeometryImageMouseLeave"
+                 MouseLeftButtonDown="OnGeometryImageMouseLeftButtonDown" />
+
+          <Canvas x:Name="GeometryOverlayCanvas"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Top"
+                  IsHitTestVisible="False">
+            <Rectangle x:Name="HoveredComponentRectangle"
+                       Stroke="#FFD740"
+                       StrokeThickness="2"
+                       Fill="#22FFD740"
+                       Visibility="Collapsed" />
+
+            <Rectangle x:Name="SelectedComponentRectangle"
+                       Stroke="#00D5FF"
+                       StrokeThickness="2"
+                       Fill="#2200D5FF"
+                       Visibility="Collapsed" />
+          </Canvas>
+
+          <Border x:Name="GeometryHitInfoPanel"
+                  Margin="10"
+                  Padding="10,7"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Top"
+                  IsHitTestVisible="False"
+                  Background="#E8172331"
+                  BorderBrush="#46627A"
+                  BorderThickness="1"
+                  CornerRadius="4"
+                  Visibility="Collapsed">
+            <StackPanel>
+              <TextBlock x:Name="GeometryHitInfoTitle"
+                         FontWeight="SemiBold"
+                         Foreground="#00D5FF" />
+              <TextBlock x:Name="GeometryHitInfoText"
+                         Margin="0,3,0,0"
+                         FontFamily="Consolas"
+                         FontSize="11"
+                         Foreground="#F2F6FA" />
+            </StackPanel>
+          </Border>
+        </Grid>
+      </Border>
+    </ScrollViewer>
+
     <wv2:WebView2 x:Name="Browser"
                   UseLayoutRounding="True"
                   SnapsToDevicePixels="True"
                   DefaultBackgroundColor="#0B1118"
+                  Visibility="Collapsed"
                   NavigationCompleted="OnNavigationCompleted" />
 
     <Border x:Name="EmptyPanel" Background="#0B1118">
-      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="340">
-        <Border Width="70" Height="70" Background="#172331" BorderBrush="#26394B" BorderThickness="1" CornerRadius="35">
-          <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe MDL2 Assets" FontSize="30" Foreground="#00B7FF" Text="&#xE8A5;" />
+      <StackPanel HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  MaxWidth="340">
+        <Border Width="70"
+                Height="70"
+                Background="#172331"
+                BorderBrush="#26394B"
+                BorderThickness="1"
+                CornerRadius="35">
+          <TextBlock HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     FontFamily="Segoe MDL2 Assets"
+                     FontSize="30"
+                     Foreground="#00B7FF"
+                     Text="&#xE8A5;" />
         </Border>
-        <TextBlock Margin="0,16,0,0" HorizontalAlignment="Center" FontSize="18" FontWeight="SemiBold" Foreground="#F2F6FA" Text="Ningún documento cargado" />
-        <TextBlock Margin="0,7,0,0" TextAlignment="Center" TextWrapping="Wrap" Foreground="#A9B8C9" Text="Utiliza la barra superior para abrir un PDF y comenzar a trabajar." />
+
+        <TextBlock Margin="0,16,0,0"
+                   HorizontalAlignment="Center"
+                   FontSize="18"
+                   FontWeight="SemiBold"
+                   Foreground="#F2F6FA"
+                   Text="Ningún documento cargado" />
+
+        <TextBlock Margin="0,7,0,0"
+                   TextAlignment="Center"
+                   TextWrapping="Wrap"
+                   Foreground="#A9B8C9"
+                   Text="Utiliza la barra superior para abrir un PDF y comenzar a trabajar." />
       </StackPanel>
     </Border>
 
-    <Border x:Name="LoadingPanel" Background="#CC0B1118" Visibility="Collapsed">
-      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-        <ProgressBar Width="220" Height="5" IsIndeterminate="True" />
-        <TextBlock Margin="0,12,0,0" Foreground="#A9B8C9" Text="Cargando documento..." />
+    <Border x:Name="LoadingPanel"
+            Background="#CC0B1118"
+            Visibility="Collapsed">
+      <StackPanel HorizontalAlignment="Center"
+                  VerticalAlignment="Center">
+        <ProgressBar Width="220"
+                     Height="5"
+                     IsIndeterminate="True" />
+
+        <TextBlock x:Name="LoadingMessage"
+                   Margin="0,12,0,0"
+                   Foreground="#A9B8C9"
+                   Text="Analizando geometría del documento..." />
       </StackPanel>
     </Border>
 
     <Border x:Name="ErrorPanel"
-            Margin="30" Padding="22"
-            HorizontalAlignment="Center" VerticalAlignment="Center"
-            Background="#172331" BorderBrush="#EF5350" BorderThickness="1"
-            CornerRadius="5" Visibility="Collapsed">
+            Margin="30"
+            Padding="22"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Background="#172331"
+            BorderBrush="#EF5350"
+            BorderThickness="1"
+            CornerRadius="5"
+            Visibility="Collapsed">
       <StackPanel MaxWidth="560">
-        <TextBlock FontSize="20" FontWeight="SemiBold" Foreground="#EF5350" Text="No se pudo mostrar el documento PDF" />
-        <TextBlock x:Name="ErrorMessage" Margin="0,10,0,0" TextWrapping="Wrap" Foreground="#F2F6FA" />
+        <TextBlock FontSize="20"
+                   FontWeight="SemiBold"
+                   Foreground="#EF5350"
+                   Text="No se pudo mostrar el documento PDF" />
+
+        <TextBlock x:Name="ErrorMessage"
+                   Margin="0,10,0,0"
+                   TextWrapping="Wrap"
+                   Foreground="#F2F6FA" />
       </StackPanel>
     </Border>
   </Grid>

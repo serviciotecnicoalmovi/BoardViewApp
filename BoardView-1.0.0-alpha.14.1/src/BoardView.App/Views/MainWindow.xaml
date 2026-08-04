@@ -109,15 +109,17 @@
                 CornerRadius="4">
           <StackPanel Orientation="Horizontal">
             <TextBlock Margin="0,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="Referencia" />
-            <TextBox Width="180"
-                     Padding="7,3"
-                     Background="#0B1118"
-                     Foreground="{StaticResource PrimaryTextBrush}"
-                     BorderBrush="{StaticResource BorderBrush}"
-                     Text="{Binding Workspace.ReferenceQuery, ElementName=Root, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBox x:Name="ReferenceTextBox"
+                      Width="180"
+                      Padding="7,3"
+                      Background="#0B1118"
+                      Foreground="{StaticResource PrimaryTextBrush}"
+                      BorderBrush="{StaticResource BorderBrush}"
+                      KeyDown="OnReferenceTextBoxKeyDown"
+                      Text="{Binding Workspace.ReferenceQuery, ElementName=Root, UpdateSourceTrigger=PropertyChanged}" />
             <Button Margin="7,0,0,0"
                     Padding="14,3"
-                    Command="{Binding Workspace.SearchCommand, ElementName=Root}"
+                    Click="OnReferenceSearchClick"
                     Content="Buscar" />
           </StackPanel>
         </Border>
@@ -172,7 +174,10 @@
             <Button Margin="0,0,0,8" Padding="0" Background="Transparent" BorderThickness="0" Command="{Binding Workspace.OpenBoardCommand, ElementName=Root}">
               <Border Padding="10" Background="{StaticResource ControlBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="5">
                 <Grid>
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="36"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="36"/>
+                    <ColumnDefinition Width="*"/>
+                  </Grid.ColumnDefinitions>
                   <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="23" Foreground="#FF5252" Text="&#xEA90;" VerticalAlignment="Center" />
                   <StackPanel Grid.Column="1">
                     <TextBlock FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" Text="Placa" />
@@ -184,7 +189,10 @@
             <Button Margin="0,0,0,8" Padding="0" Background="Transparent" BorderThickness="0" Command="{Binding Workspace.OpenSchematicCommand, ElementName=Root}">
               <Border Padding="10" Background="{StaticResource ControlBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="5">
                 <Grid>
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="36"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="36"/>
+                    <ColumnDefinition Width="*"/>
+                  </Grid.ColumnDefinitions>
                   <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="23" Foreground="#7E57C2" Text="&#xE8A5;" VerticalAlignment="Center" />
                   <StackPanel Grid.Column="1">
                     <TextBlock FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" Text="Esquemático" />
@@ -205,7 +213,10 @@
               <ListBox.ItemTemplate>
                 <DataTemplate>
                   <Grid Margin="0,3" MinHeight="38">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="30"/>
+                      <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
                     <Border Width="26" Height="26" Background="{Binding AccentColor}" CornerRadius="5">
                       <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="White" Text="{Binding IconGlyph}" />
                     </Border>
@@ -225,10 +236,16 @@
 
       <Border Grid.Column="2" Margin="8" Background="#0B1118" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
         <Grid>
-          <Grid.RowDefinitions><RowDefinition Height="42"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="42"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
           <Border Background="#111D29" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
             <Grid Margin="12,0">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
               <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Foreground="#FF5252" Text="&#xEA90;" />
                 <TextBlock Margin="8,0,0,0" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" Text="BOARD" />
@@ -236,10 +253,10 @@
               <TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding Workspace.BoardFileName, ElementName=Root}" />
             </Grid>
           </Border>
-          <controls:PdfDocumentView Grid.Row="1"
+          <controls:PdfDocumentView x:Name="BoardPdfDocumentView"
+                                    Grid.Row="1"
                                     FilePath="{Binding Workspace.BoardFilePath, ElementName=Root}"
-                                    PageNumber="{Binding Workspace.BoardPage, ElementName=Root}"
-                                    SearchTerm="{Binding Workspace.ActiveReference, ElementName=Root}" />
+                                    PageNumber="{Binding Workspace.BoardPage, ElementName=Root}" />
         </Grid>
       </Border>
 
@@ -247,10 +264,16 @@
 
       <Border Grid.Column="4" Margin="8" Background="#0B1118" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
         <Grid>
-          <Grid.RowDefinitions><RowDefinition Height="42"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="42"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
           <Border Background="#111D29" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
             <Grid Margin="12,0">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
               <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Foreground="#7E57C2" Text="&#xE8A5;" />
                 <TextBlock Margin="8,0,0,0" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource PrimaryTextBrush}" Text="SCHEMATIC" />
@@ -258,10 +281,10 @@
               <TextBlock Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding Workspace.SchematicFileName, ElementName=Root}" />
             </Grid>
           </Border>
-          <controls:PdfDocumentView Grid.Row="1"
+          <controls:PdfDocumentView x:Name="SchematicPdfDocumentView"
+                                    Grid.Row="1"
                                     FilePath="{Binding Workspace.SchematicFilePath, ElementName=Root}"
-                                    PageNumber="{Binding Workspace.SchematicPage, ElementName=Root}"
-                                    SearchTerm="{Binding Workspace.ActiveReference, ElementName=Root}" />
+                                    PageNumber="{Binding Workspace.SchematicPage, ElementName=Root}" />
         </Grid>
       </Border>
 
@@ -274,7 +297,10 @@
         <TabControl Margin="8" Background="Transparent" BorderBrush="{StaticResource BorderBrush}">
           <TabItem Header="Resultados">
             <Grid Margin="8">
-              <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+              </Grid.RowDefinitions>
               <TextBlock Margin="0,0,0,8" Foreground="{StaticResource SecondaryTextBrush}" Text="Coincidencias de búsqueda" />
               <ListBox Grid.Row="1"
                        ItemsSource="{Binding Workspace.SearchResultsView, ElementName=Root}"
@@ -392,7 +418,11 @@
             BorderBrush="{StaticResource BorderBrush}"
             BorderThickness="0,1,0,0">
       <Grid Margin="12,0">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
         <TextBlock VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}" Text="{Binding Workspace.StatusMessage, ElementName=Root}" />
         <TextBlock Grid.Column="1" Margin="12,0" VerticalAlignment="Center" Foreground="{StaticResource SecondaryTextBrush}">
           <Run Text="Board pág. "/><Run Text="{Binding Workspace.BoardPage, ElementName=Root}"/><Run Text=" · Sch pág. "/><Run Text="{Binding Workspace.SchematicPage, ElementName=Root}"/>
