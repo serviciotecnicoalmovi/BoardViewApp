@@ -283,6 +283,44 @@ public sealed class SchematicComponentGraphBuilder
                 bounds,
                 terminalNodes);
 
+        /*
+         * Protección final contra cajas de propiedad desproporcionadas. Si la
+         * exploración produce una región incompatible con el ancla, se conserva
+         * el nodo semilla para no desplazar el visor hacia otra zona de la página.
+         */
+        double maximumExtent =
+            Math.Max(
+                64D,
+                Math.Max(
+                    seed.Bounds.Width,
+                    seed.Bounds.Height) *
+                5D);
+
+        if (bounds.Width > maximumExtent ||
+            bounds.Height > maximumExtent ||
+            DistanceBetweenBounds(
+                seed.Bounds,
+                bounds) >
+            ResolveOwnershipRadius(seed.Bounds))
+        {
+            visualNodes =
+            [
+                seed
+            ];
+
+            terminalNodes =
+                Array.Empty<SchematicElectricalNode>();
+
+            terminals =
+                Array.Empty<SchematicComponentTerminal>();
+
+            netNames =
+                Array.Empty<string>();
+
+            bounds =
+                seed.Bounds;
+        }
+
         double confidence =
             CalculateConfidence(
                 anchor,
@@ -417,11 +455,27 @@ public sealed class SchematicComponentGraphBuilder
             return false;
         }
 
+        double ownershipRadius =
+            ResolveOwnershipRadius(
+                seed.Bounds);
+
+        double distanceFromSeed =
+            DistanceBetweenBounds(
+                seed.Bounds,
+                candidate.Bounds);
+
         if (candidate.Kind is
                 SchematicElectricalNodeKind.Pin or
                 SchematicElectricalNodeKind.Terminal)
         {
-            return true;
+            /*
+             * Un pin o terminal sólo pertenece al componente cuando continúa
+             * dentro de su vecindad física. La versión anterior aceptaba todos
+             * los terminales alcanzables y podía absorber componentes remotos
+             * pertenecientes a la misma red.
+             */
+            return distanceFromSeed <=
+                   ownershipRadius;
         }
 
         if (candidate.Kind is
@@ -429,10 +483,8 @@ public sealed class SchematicComponentGraphBuilder
                 SchematicElectricalNodeKind.Junction)
         {
             return depth <= 2 &&
-                   DistanceBetweenBounds(
-                       seed.Bounds,
-                       candidate.Bounds) <=
-                   ResolveOwnershipRadius(seed.Bounds);
+                   distanceFromSeed <=
+                   ownershipRadius;
         }
 
         return false;
@@ -691,12 +743,20 @@ public sealed class SchematicComponentGraphBuilder
     private static double ResolveOwnershipRadius(
         BoardGeometryBounds seedBounds)
     {
-        return Math.Max(
-            24D,
+        double dominantDimension =
             Math.Max(
                 seedBounds.Width,
-                seedBounds.Height) *
-            1.75D);
+                seedBounds.Height);
+
+        /*
+         * El radio debe cubrir pines inmediatos, no una red completa. El límite
+         * superior impide que un cuerpo grande convierta toda la página en su
+         * zona de propiedad.
+         */
+        return Math.Clamp(
+            dominantDimension * 1.75D,
+            24D,
+            180D);
     }
 
     private static double DistanceBetweenBounds(
