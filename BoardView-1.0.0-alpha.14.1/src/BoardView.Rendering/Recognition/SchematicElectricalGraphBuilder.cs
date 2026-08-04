@@ -16,11 +16,13 @@ public sealed class SchematicElectricalGraphBuilder
 {
     private readonly SchematicPrimitiveClassifier primitiveClassifier;
     private readonly SchematicPinConnector pinConnector;
+    private readonly SchematicWireAssembler wireAssembler;
 
     public SchematicElectricalGraphBuilder()
         : this(
             new SchematicPrimitiveClassifier(),
-            new SchematicPinConnector())
+            new SchematicPinConnector(),
+            new SchematicWireAssembler())
     {
     }
 
@@ -28,13 +30,25 @@ public sealed class SchematicElectricalGraphBuilder
         SchematicPrimitiveClassifier primitiveClassifier)
         : this(
             primitiveClassifier,
-            new SchematicPinConnector())
+            new SchematicPinConnector(),
+            new SchematicWireAssembler())
     {
     }
 
     public SchematicElectricalGraphBuilder(
         SchematicPrimitiveClassifier primitiveClassifier,
         SchematicPinConnector pinConnector)
+        : this(
+            primitiveClassifier,
+            pinConnector,
+            new SchematicWireAssembler())
+    {
+    }
+
+    public SchematicElectricalGraphBuilder(
+        SchematicPrimitiveClassifier primitiveClassifier,
+        SchematicPinConnector pinConnector,
+        SchematicWireAssembler wireAssembler)
     {
         this.primitiveClassifier =
             primitiveClassifier ??
@@ -43,6 +57,10 @@ public sealed class SchematicElectricalGraphBuilder
         this.pinConnector =
             pinConnector ??
             throw new ArgumentNullException(nameof(pinConnector));
+
+        this.wireAssembler =
+            wireAssembler ??
+            throw new ArgumentNullException(nameof(wireAssembler));
     }
 
     /// <summary>
@@ -229,10 +247,15 @@ public sealed class SchematicElectricalGraphBuilder
          * fuera de las consultas QueryNearest locales por fragmentación,
          * límites de vecinos o pequeñas discontinuidades del rasterizado.
          */
-        AddGlobalConductorConnections(
-            nodes,
-            normalizedEdges,
-            options);
+        IReadOnlyList<SchematicElectricalEdge> assembledWireEdges =
+            wireAssembler.Assemble(
+                nodes,
+                normalizedEdges,
+                options,
+                cancellationToken);
+
+        normalizedEdges.AddRange(
+            assembledWireEdges);
 
         AddExplicitJunctionConnections(
             nodes,
