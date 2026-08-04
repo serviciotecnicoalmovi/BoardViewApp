@@ -15,18 +15,34 @@ namespace BoardView.Rendering.Recognition;
 public sealed class SchematicElectricalGraphBuilder
 {
     private readonly SchematicPrimitiveClassifier primitiveClassifier;
+    private readonly SchematicPinConnector pinConnector;
 
     public SchematicElectricalGraphBuilder()
-        : this(new SchematicPrimitiveClassifier())
+        : this(
+            new SchematicPrimitiveClassifier(),
+            new SchematicPinConnector())
     {
     }
 
     public SchematicElectricalGraphBuilder(
         SchematicPrimitiveClassifier primitiveClassifier)
+        : this(
+            primitiveClassifier,
+            new SchematicPinConnector())
+    {
+    }
+
+    public SchematicElectricalGraphBuilder(
+        SchematicPrimitiveClassifier primitiveClassifier,
+        SchematicPinConnector pinConnector)
     {
         this.primitiveClassifier =
             primitiveClassifier ??
             throw new ArgumentNullException(nameof(primitiveClassifier));
+
+        this.pinConnector =
+            pinConnector ??
+            throw new ArgumentNullException(nameof(pinConnector));
     }
 
     /// <summary>
@@ -165,7 +181,8 @@ public sealed class SchematicElectricalGraphBuilder
             NormalizeTopology(
                 nodes,
                 edges,
-                options);
+                options,
+                cancellationToken);
 
         return new SchematicElectricalGraph(
             geometryIndex.PageWidth,
@@ -188,10 +205,11 @@ public sealed class SchematicElectricalGraphBuilder
     /// <item>una unión compacta débil no debe fusionar redes por sí sola.</item>
     /// </list>
     /// </remarks>
-    private static IReadOnlyList<SchematicElectricalEdge> NormalizeTopology(
+    private IReadOnlyList<SchematicElectricalEdge> NormalizeTopology(
         IReadOnlyList<SchematicElectricalNode> nodes,
         IReadOnlyList<SchematicElectricalEdge> edges,
-        SchematicElectricalGraphBuilderOptions options)
+        SchematicElectricalGraphBuilderOptions options,
+        CancellationToken cancellationToken)
     {
         if (edges.Count == 0)
         {
@@ -225,6 +243,15 @@ public sealed class SchematicElectricalGraphBuilder
             nodes,
             normalizedEdges,
             options);
+
+        IReadOnlyList<SchematicElectricalEdge> pinEdges =
+            pinConnector.Connect(
+                nodes,
+                normalizedEdges,
+                options,
+                cancellationToken);
+
+        normalizedEdges.AddRange(pinEdges);
 
         var retained =
             new HashSet<SchematicElectricalEdge>(
@@ -2229,6 +2256,20 @@ public sealed record SchematicElectricalGraphBuilderOptions
     public double AxisOverlapWeight { get; init; } = 0.20D;
     public double GapDistanceWeight { get; init; } = 0.28D;
 
+    public double MaximumPinBodyEndpointGapPixels { get; init; } = 14D;
+    public double MinimumPinBodyAlignment { get; init; } = 0.22D;
+    public double PinBodyBaseConfidence { get; init; } = 0.56D;
+    public double PinBodyDistanceWeight { get; init; } = 0.24D;
+    public double PinBodyAlignmentWeight { get; init; } = 0.18D;
+
+    public double MaximumPinConductorEndpointGapPixels { get; init; } = 10D;
+    public double PinEndpointContainmentTolerancePixels { get; init; } = 3D;
+    public double MinimumPinConductorAlignment { get; init; } = 0.20D;
+    public double PinConductorBaseConfidence { get; init; } = 0.54D;
+    public double PinConductorDistanceWeight { get; init; } = 0.28D;
+    public double PinConductorAlignmentWeight { get; init; } = 0.14D;
+    public int MaximumConductorsPerPin { get; init; } = 2;
+
     /// <summary>
     /// Una conexión directa cuerpo-red se conserva únicamente cuando supera
     /// este nivel, aun si existe un pin intermedio.
@@ -2421,6 +2462,54 @@ public sealed record SchematicElectricalGraphBuilderOptions
         ValidateProbability(
             GapDistanceWeight,
             nameof(GapDistanceWeight));
+
+        ValidateNonNegativeFinite(
+            MaximumPinBodyEndpointGapPixels,
+            nameof(MaximumPinBodyEndpointGapPixels));
+
+        ValidateProbability(
+            MinimumPinBodyAlignment,
+            nameof(MinimumPinBodyAlignment));
+
+        ValidateProbability(
+            PinBodyBaseConfidence,
+            nameof(PinBodyBaseConfidence));
+
+        ValidateProbability(
+            PinBodyDistanceWeight,
+            nameof(PinBodyDistanceWeight));
+
+        ValidateProbability(
+            PinBodyAlignmentWeight,
+            nameof(PinBodyAlignmentWeight));
+
+        ValidateNonNegativeFinite(
+            MaximumPinConductorEndpointGapPixels,
+            nameof(MaximumPinConductorEndpointGapPixels));
+
+        ValidateNonNegativeFinite(
+            PinEndpointContainmentTolerancePixels,
+            nameof(PinEndpointContainmentTolerancePixels));
+
+        ValidateProbability(
+            MinimumPinConductorAlignment,
+            nameof(MinimumPinConductorAlignment));
+
+        ValidateProbability(
+            PinConductorBaseConfidence,
+            nameof(PinConductorBaseConfidence));
+
+        ValidateProbability(
+            PinConductorDistanceWeight,
+            nameof(PinConductorDistanceWeight));
+
+        ValidateProbability(
+            PinConductorAlignmentWeight,
+            nameof(PinConductorAlignmentWeight));
+
+        ValidatePositive(
+            MaximumConductorsPerPin,
+            nameof(MaximumConductorsPerPin));
 
         ValidateProbability(
             RedundantBodyWireRetentionConfidence,
