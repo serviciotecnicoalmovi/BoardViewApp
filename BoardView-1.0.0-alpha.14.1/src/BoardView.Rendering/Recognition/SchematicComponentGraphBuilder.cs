@@ -269,10 +269,11 @@ public sealed class SchematicComponentGraphBuilder
                 .ToArray();
 
         BoardGeometryBounds bounds =
-            CombineBounds(
-                visualNodes.Select(
-                    node =>
-                        node.Bounds));
+            CalculateVisualBounds(
+                anchor,
+                seed,
+                visualNodes,
+                terminalNodes);
 
         SchematicComponentKind kind =
             ResolveKind(
@@ -649,6 +650,163 @@ public sealed class SchematicComponentGraphBuilder
                 SchematicComponentKind.TestPoint,
             _ => SchematicComponentKind.Unknown
         };
+    }
+
+    /// <summary>
+    /// Calcula el contorno visual del componente utilizando el cuerpo y sólo
+    /// los terminales físicamente inmediatos.
+    /// </summary>
+    private static BoardGeometryBounds CalculateVisualBounds(
+        SchematicReferenceAnchor anchor,
+        SchematicElectricalNode seed,
+        IReadOnlyList<SchematicElectricalNode> visualNodes,
+        IReadOnlyList<SchematicElectricalNode> terminalNodes)
+    {
+        SchematicElectricalNode body =
+            anchor.SymbolBodyNode ??
+            visualNodes
+                .FirstOrDefault(node =>
+                    node.Kind ==
+                    SchematicElectricalNodeKind.SymbolBody) ??
+            seed;
+
+        var acceptedBounds =
+            new List<BoardGeometryBounds>
+            {
+                body.Bounds
+            };
+
+        double bodyScale =
+            Math.Max(
+                1D,
+                Math.Max(
+                    body.Bounds.Width,
+                    body.Bounds.Height));
+
+        double terminalDistanceLimit =
+            Math.Clamp(
+                bodyScale * 1.15D,
+                18D,
+                96D);
+
+        foreach (SchematicElectricalNode terminal in terminalNodes)
+        {
+            double distance =
+                DistanceBetweenBounds(
+                    body.Bounds,
+                    terminal.Bounds);
+
+            if (distance <=
+                terminalDistanceLimit)
+            {
+                acceptedBounds.Add(
+                    terminal.Bounds);
+            }
+        }
+
+        /*
+         * En símbolos donde el cuerpo no fue clasificado explícitamente,
+         * incorpora geometrías visuales inmediatas, pero nunca conductores ni
+         * elementos semánticos.
+         */
+        if (anchor.SymbolBodyNode is null)
+        {
+            double visualDistanceLimit =
+                Math.Clamp(
+                    bodyScale * 0.90D,
+                    14D,
+                    72D);
+
+            foreach (SchematicElectricalNode node in visualNodes)
+            {
+                if (node.Id == body.Id ||
+                    node.Kind is
+                        SchematicElectricalNodeKind.Wire or
+                        SchematicElectricalNodeKind.Junction or
+                        SchematicElectricalNodeKind.NetLabel or
+                        SchematicElectricalNodeKind.Bus or
+                        SchematicElectricalNodeKind.BusEntry)
+                {
+                    continue;
+                }
+
+                if (DistanceBetweenBounds(
+                        body.Bounds,
+                        node.Bounds) <=
+                    visualDistanceLimit)
+                {
+                    acceptedBounds.Add(
+                        node.Bounds);
+                }
+            }
+        }
+
+        BoardGeometryBounds combined =
+            CombineBounds(
+                acceptedBounds);
+
+        double padding =
+            Math.Clamp(
+                Math.Min(
+                    Math.Max(
+                        1D,
+                        body.Bounds.Width),
+                    Math.Max(
+                        1D,
+                        body.Bounds.Height)) *
+                0.10D,
+                2D,
+                8D);
+
+        return ExpandBounds(
+            combined,
+            padding);
+    }
+
+    /// <summary>
+    /// Añade un margen visual mínimo sin incorporar geometría de la red.
+    /// </summary>
+    private static BoardGeometryBounds ExpandBounds(
+        BoardGeometryBounds bounds,
+        double padding)
+    {
+        int left =
+            Math.Max(
+                0,
+                checked(
+                    (int)Math.Floor(
+                        bounds.Left -
+                        padding)));
+
+        int top =
+            Math.Max(
+                0,
+                checked(
+                    (int)Math.Floor(
+                        bounds.Top -
+                        padding)));
+
+        int right =
+            Math.Max(
+                left + 1,
+                checked(
+                    (int)Math.Ceiling(
+                        bounds.Right +
+                        padding)));
+
+        int bottom =
+            Math.Max(
+                top + 1,
+                checked(
+                    (int)Math.Ceiling(
+                        bounds.Bottom +
+                        padding)));
+
+        return new BoardGeometryBounds(
+            left,
+            top,
+            right - left,
+            bottom - top);
     }
 
     private static SchematicComponentOrientation ResolveOrientation(
