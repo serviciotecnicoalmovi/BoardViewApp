@@ -183,24 +183,42 @@ public sealed class SchematicElectricalGraphBuilder
                 node =>
                     node.Id);
 
+        var normalizedEdges =
+            edges.ToList();
+
+        /*
+         * Segunda pasada global para recuperar continuidad que puede quedar
+         * fuera de las consultas QueryNearest locales por fragmentación,
+         * límites de vecinos o pequeñas discontinuidades del rasterizado.
+         */
+        AddGlobalConductorConnections(
+            nodes,
+            normalizedEdges,
+            options);
+
+        AddExplicitJunctionConnections(
+            nodes,
+            normalizedEdges,
+            options);
+
         var retained =
             new HashSet<SchematicElectricalEdge>(
-                edges);
+                normalizedEdges);
 
         ResolveExclusiveBodyOwnership(
             nodesById,
-            edges,
+            normalizedEdges,
             retained);
 
         RemoveRedundantBodyWireEdges(
             nodesById,
-            edges,
+            normalizedEdges,
             retained,
             options);
 
         RemoveWeakFalseJunctions(
             nodesById,
-            edges,
+            normalizedEdges,
             retained,
             options);
 
@@ -212,6 +230,208 @@ public sealed class SchematicElectricalGraphBuilder
                 edge =>
                     edge.SecondNodeId)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Recupera conexiones entre conductores fragmentados mediante una pasada
+    /// global determinista. No fusiona nodos: añade aristas topológicas para
+    /// que el BFS pueda atravesar una red continua aun cuando el PDF la haya
+    /// dividido en varios componentes geométricos.
+    /// </summary>
+    private static void AddGlobalConductorConnections(
+        IReadOnlyList<SchematicElectricalNode> nodes,
+        ICollection<SchematicElectricalEdge> edges,
+        SchematicElectricalGraphBuilderOptions options)
+    {
+        SchematicElectricalNode[] conductors =
+            nodes
+                .Where(node => node.IsWireLike)
+                .OrderBy(node => node.Bounds.Left)
+                .ThenBy(node => node.Bounds.Top)
+                .ThenBy(node => node.Id)
+                .ToArray();
+
+        var existingPairs =
+            edges
+                .Select(edge =>
+                    (edge.FirstNodeId, edge.SecondNodeId))
+                .ToHashSet();
+
+        double maximumForwardDistance =
+            Math.Max(
+                options.MaximumCollinearGapPixels,
+                options.EndpointToSegmentTolerancePixels) +
+            options.CollinearAxisTolerancePixels;
+
+        for (int firstIndex = 0;
+             firstIndex < conductors.Length;
+             firstIndex++)
+        {
+            SchematicElectricalNode first =
+                conductors[firstIndex];
+
+            for (int secondIndex = firstIndex + 1;
+                 secondIndex < conductors.Length;
+                 secondIndex++)
+            {
+                SchematicElectricalNode second =
+                    conductors[secondIndex];
+
+                if (second.Bounds.Left >
+                    first.Bounds.Right +
+                    maximumForwardDistance)
+                {
+                    break;
+                }
+
+                int firstId =
+                    Math.Min(first.Id, second.Id);
+
+                int secondId =
+                    Math.Max(first.Id, second.Id);
+
+                if (existingPairs.Contains((firstId, secondId)))
+                {
+                    continue;
+                }
+
+                ConnectionEvaluation evaluation =
+                    EvaluateCollinearConnection(
+                        first,
+                        second,
+                        options);
+
+                if (!evaluation.IsConnected)
+                {
+                    evaluation =
+                        EvaluateEndpointToSegmentConnection(
+                            first,
+                            second,
+                            options);
+                }
+
+                if (!evaluation.IsConnected)
+                {
+                    evaluation =
+                        EvaluateEndpointContact(
+                            first,
+                            second,
+                            options);
+                }
+
+                if (!evaluation.IsConnected ||
+                    evaluation.Confidence <
+                    options.MinimumEdgeConfidence)
+                {
+                    continue;
+                }
+
+                edges.Add(
+                    new SchematicElectricalEdge(
+                        firstId,
+                        secondId,
+                        evaluation.Kind,
+                        evaluation.Confidence,
+                        evaluation.DistancePixels,
+                        evaluation.ContactX,
+                        evaluation.ContactY));
+
+                existingPairs.Add((firstId, secondId));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Conecta explícitamente cada punto de unión con todos los segmentos que
+    /// realmente alcanzan su centro. Esta pasada permite representar uniones
+    /// en T y cruces con punto aun cuando la segmentación produzca múltiples
+    /// componentes pequeños alrededor de la unión.
+    /// </summary>
+    private static void AddExplicitJunctionConnections(
+        IReadOnlyList<SchematicElectricalNode> nodes,
+        ICollection<SchematicElectricalEdge> edges,
+        SchematicElectricalGraphBuilderOptions options)
+    {
+        SchematicElectricalNode[] junctions =
+            nodes
+                .Where(node =>
+                    node.Kind ==
+                    SchematicElectricalNodeKind.Junction)
+                .OrderBy(node => node.Id)
+                .ToArray();
+
+        SchematicElectricalNode[] conductors =
+            nodes
+                .Where(node => node.IsWireLike)
+                .OrderBy(node => node.Id)
+                .ToArray();
+
+        var existingPairs =
+            edges
+                .Select(edge =>
+                    (edge.FirstNodeId, edge.SecondNodeId))
+                .ToHashSet();
+
+        foreach (SchematicElectricalNode junction in junctions)
+        {
+            foreach (SchematicElectricalNode conductor in conductors)
+            {
+                int firstId =
+                    Math.Min(junction.Id, conductor.Id);
+
+                int secondId =
+                    Math.Max(junction.Id, conductor.Id);
+
+                if (existingPairs.Contains((firstId, secondId)))
+                {
+                    continue;
+                }
+
+                double distance =
+                    DistancePointToBounds(
+                        junction.CenterX,
+                        junction.CenterY,
+                        conductor.Bounds);
+
+                if (distance >
+                    options.JunctionConnectionTolerancePixels)
+                {
+                    continue;
+                }
+
+                double distanceScore =
+                    Clamp01(
+                        1D -
+                        (distance /
+                         Math.Max(
+                             1D,
+                             options.JunctionConnectionTolerancePixels)));
+
+                double confidence =
+                    Clamp01(
+                        options.JunctionBaseConfidence +
+                        (distanceScore *
+                         options.JunctionDistanceWeight));
+
+                if (confidence <
+                    options.MinimumEdgeConfidence)
+                {
+                    continue;
+                }
+
+                edges.Add(
+                    new SchematicElectricalEdge(
+                        firstId,
+                        secondId,
+                        SchematicElectricalEdgeKind.EndpointContact,
+                        confidence,
+                        distance,
+                        junction.CenterX,
+                        junction.CenterY));
+
+                existingPairs.Add((firstId, secondId));
+            }
+        }
     }
 
     /// <summary>
