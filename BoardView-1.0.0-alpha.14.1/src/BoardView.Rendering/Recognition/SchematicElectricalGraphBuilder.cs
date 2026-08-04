@@ -201,6 +201,11 @@ public sealed class SchematicElectricalGraphBuilder
             normalizedEdges,
             options);
 
+        RecoverBodyTerminalConnections(
+            nodes,
+            normalizedEdges,
+            options);
+
         var retained =
             new HashSet<SchematicElectricalEdge>(
                 normalizedEdges);
@@ -428,6 +433,133 @@ public sealed class SchematicElectricalGraphBuilder
                         distance,
                         junction.CenterX,
                         junction.CenterY));
+
+                existingPairs.Add((firstId, secondId));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Recupera relaciones cuerpo-terminal que pueden perderse cuando el PDF
+    /// fragmenta un pin en varios componentes o cuando QueryNearest agota su
+    /// límite de vecinos alrededor de una zona densa.
+    /// </summary>
+    /// <remarks>
+    /// La recuperación es deliberadamente estricta: sólo considera pines,
+    /// terminales y conductores cortos; exige alineación con uno de los bordes
+    /// del cuerpo y una separación reducida. Nunca conecta un cuerpo con una
+    /// línea de red larga, evitando que el BFS salte directamente a toda la net.
+    /// </remarks>
+    private static void RecoverBodyTerminalConnections(
+        IReadOnlyList<SchematicElectricalNode> nodes,
+        ICollection<SchematicElectricalEdge> edges,
+        SchematicElectricalGraphBuilderOptions options)
+    {
+        SchematicElectricalNode[] bodies =
+            nodes
+                .Where(node =>
+                    node.Kind ==
+                    SchematicElectricalNodeKind.SymbolBody)
+                .OrderBy(node => node.Id)
+                .ToArray();
+
+        SchematicElectricalNode[] terminalCandidates =
+            nodes
+                .Where(node =>
+                    node.Kind is
+                        SchematicElectricalNodeKind.Pin or
+                        SchematicElectricalNodeKind.Terminal or
+                        SchematicElectricalNodeKind.Wire)
+                .Where(node =>
+                    Math.Max(
+                        node.Bounds.Width,
+                        node.Bounds.Height) <=
+                    options.MaximumRecoverableTerminalLengthPixels)
+                .OrderBy(node => node.Id)
+                .ToArray();
+
+        var existingPairs =
+            edges
+                .Select(edge =>
+                    (edge.FirstNodeId, edge.SecondNodeId))
+                .ToHashSet();
+
+        foreach (SchematicElectricalNode body in bodies)
+        {
+            foreach (SchematicElectricalNode terminal in terminalCandidates)
+            {
+                int firstId = Math.Min(body.Id, terminal.Id);
+                int secondId = Math.Max(body.Id, terminal.Id);
+
+                if (existingPairs.Contains((firstId, secondId)))
+                {
+                    continue;
+                }
+
+                double distance =
+                    DistanceBetweenBounds(
+                        body.Bounds,
+                        terminal.Bounds);
+
+                if (distance >
+                    options.MaximumRecoveredBodyTerminalGapPixels)
+                {
+                    continue;
+                }
+
+                double alignment =
+                    CalculateBestAxisAlignment(
+                        body.Bounds,
+                        terminal.Bounds);
+
+                if (alignment <
+                    options.MinimumRecoveredBodyTerminalAlignment)
+                {
+                    continue;
+                }
+
+                EndpointProjection terminalToBody =
+                    FindBestEndpointProjection(
+                        terminal.Bounds,
+                        body.Bounds);
+
+                if (terminalToBody.DistancePixels >
+                    options.MaximumRecoveredBodyTerminalGapPixels)
+                {
+                    continue;
+                }
+
+                double distanceScore =
+                    Clamp01(
+                        1D -
+                        (terminalToBody.DistancePixels /
+                         Math.Max(
+                             1D,
+                             options.MaximumRecoveredBodyTerminalGapPixels)));
+
+                double confidence =
+                    Clamp01(
+                        options.RecoveredBodyTerminalBaseConfidence +
+                        (distanceScore *
+                         options.RecoveredBodyTerminalDistanceWeight) +
+                        (alignment *
+                         options.AxisOverlapWeight));
+
+                if (confidence <
+                    options.MinimumEdgeConfidence)
+                {
+                    continue;
+                }
+
+                edges.Add(
+                    new SchematicElectricalEdge(
+                        firstId,
+                        secondId,
+                        SchematicElectricalEdgeKind.EndpointContact,
+                        confidence,
+                        terminalToBody.DistancePixels,
+                        terminalToBody.ContactX,
+                        terminalToBody.ContactY));
 
                 existingPairs.Add((firstId, secondId));
             }
@@ -2158,6 +2290,9 @@ public sealed record SchematicElectricalGraphBuilderOptions
     public double MinimumWireAspectRatio { get; init; } = 3D;
     public double MaximumWireThicknessPixels { get; init; } = 9D;
     public double MaximumPinLengthPixels { get; init; } = 42D;
+    public double MaximumRecoverableTerminalLengthPixels { get; init; } = 58D;
+    public double MaximumRecoveredBodyTerminalGapPixels { get; init; } = 12D;
+    public double MinimumRecoveredBodyTerminalAlignment { get; init; } = 0.28D;
     public double MinimumTerminalAspectRatio { get; init; } = 2D;
     public double MaximumTerminalLengthPixels { get; init; } = 56D;
     public double MaximumPinThicknessPixels { get; init; } = 11D;
@@ -2170,6 +2305,8 @@ public sealed record SchematicElectricalGraphBuilderOptions
     public double JunctionDistanceWeight { get; init; } = 0.18D;
     public double BodyPinBaseConfidence { get; init; } = 0.58D;
     public double BodyPinDistanceWeight { get; init; } = 0.22D;
+    public double RecoveredBodyTerminalBaseConfidence { get; init; } = 0.56D;
+    public double RecoveredBodyTerminalDistanceWeight { get; init; } = 0.24D;
     public double EndpointBaseConfidence { get; init; } = 0.54D;
     public double EndpointToSegmentBaseConfidence { get; init; } = 0.60D;
     public double EndpointDistanceWeight { get; init; } = 0.30D;
@@ -2274,6 +2411,18 @@ public sealed record SchematicElectricalGraphBuilderOptions
             nameof(MaximumPinLengthPixels));
 
         ValidatePositiveFinite(
+            MaximumRecoverableTerminalLengthPixels,
+            nameof(MaximumRecoverableTerminalLengthPixels));
+
+        ValidateNonNegativeFinite(
+            MaximumRecoveredBodyTerminalGapPixels,
+            nameof(MaximumRecoveredBodyTerminalGapPixels));
+
+        ValidateProbability(
+            MinimumRecoveredBodyTerminalAlignment,
+            nameof(MinimumRecoveredBodyTerminalAlignment));
+
+        ValidatePositiveFinite(
             MinimumTerminalAspectRatio,
             nameof(MinimumTerminalAspectRatio));
 
@@ -2316,6 +2465,14 @@ public sealed record SchematicElectricalGraphBuilderOptions
         ValidateProbability(
             BodyPinDistanceWeight,
             nameof(BodyPinDistanceWeight));
+
+        ValidateProbability(
+            RecoveredBodyTerminalBaseConfidence,
+            nameof(RecoveredBodyTerminalBaseConfidence));
+
+        ValidateProbability(
+            RecoveredBodyTerminalDistanceWeight,
+            nameof(RecoveredBodyTerminalDistanceWeight));
 
         ValidateProbability(
             EndpointBaseConfidence,
