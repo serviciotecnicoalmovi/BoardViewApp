@@ -14,6 +14,21 @@ namespace BoardView.Rendering.Recognition;
 /// </remarks>
 public sealed class SchematicElectricalGraphBuilder
 {
+    private readonly SchematicPrimitiveClassifier primitiveClassifier;
+
+    public SchematicElectricalGraphBuilder()
+        : this(new SchematicPrimitiveClassifier())
+    {
+    }
+
+    public SchematicElectricalGraphBuilder(
+        SchematicPrimitiveClassifier primitiveClassifier)
+    {
+        this.primitiveClassifier =
+            primitiveClassifier ??
+            throw new ArgumentNullException(nameof(primitiveClassifier));
+    }
+
     /// <summary>
     /// Construye el grafo con la configuración predeterminada.
     /// </summary>
@@ -51,12 +66,17 @@ public sealed class SchematicElectricalGraphBuilder
                     !queryOptions.ExcludedTypes.Contains(
                         component.Type))
                 .Select(component =>
-                    new SchematicElectricalNode(
-                        component.Id,
-                        ClassifyNode(
+                {
+                    SchematicPrimitiveClassification primitive =
+                        primitiveClassifier.Classify(
                             component,
-                            options),
-                        component))
+                            options);
+
+                    return new SchematicElectricalNode(
+                        component.Id,
+                        primitive.Kind,
+                        component);
+                })
                 .OrderBy(node => node.Id)
                 .ToArray();
 
@@ -889,114 +909,6 @@ public sealed class SchematicElectricalGraphBuilder
 
     /// <summary>
     /// Clasifica el rol eléctrico aproximado de una geometría.
-    /// </summary>
-    private static SchematicElectricalNodeKind ClassifyNode(
-        BoardGeometryIndexedComponent component,
-        SchematicElectricalGraphBuilderOptions options)
-    {
-        BoardGeometryBounds bounds =
-            component.Bounds;
-
-        double width =
-            Math.Max(
-                1D,
-                bounds.Width);
-
-        double height =
-            Math.Max(
-                1D,
-                bounds.Height);
-
-        double minimumDimension =
-            Math.Min(
-                width,
-                height);
-
-        double maximumDimension =
-            Math.Max(
-                width,
-                height);
-
-        double aspectRatio =
-            maximumDimension /
-            minimumDimension;
-
-        double area =
-            width *
-            height;
-
-        if (component.Type ==
-            BoardGeometryComponentType.ComponentBody)
-        {
-            return SchematicElectricalNodeKind.SymbolBody;
-        }
-
-        if (component.Type ==
-            BoardGeometryComponentType.Hole)
-        {
-            return SchematicElectricalNodeKind.Hole;
-        }
-
-        if (component.Type ==
-            BoardGeometryComponentType.Pad)
-        {
-            return area <=
-                   options.MaximumJunctionAreaPixels
-                ? SchematicElectricalNodeKind.Junction
-                : SchematicElectricalNodeKind.Pad;
-        }
-
-        bool thinLinearGeometry =
-            minimumDimension <=
-                options.MaximumWireThicknessPixels &&
-            aspectRatio >=
-                options.MinimumWireAspectRatio;
-
-        if (thinLinearGeometry)
-        {
-            /*
-             * Los segmentos cortos suelen ser pines o terminales. Los largos
-             * representan con mayor probabilidad una red.
-             */
-            if (maximumDimension <=
-                options.MaximumPinLengthPixels)
-            {
-                return SchematicElectricalNodeKind.Pin;
-            }
-
-            return SchematicElectricalNodeKind.Wire;
-        }
-
-        if (area <=
-                options.MaximumJunctionAreaPixels &&
-            aspectRatio <=
-                options.MaximumJunctionAspectRatio)
-        {
-            return SchematicElectricalNodeKind.Junction;
-        }
-
-        if (aspectRatio >=
-                options.MinimumTerminalAspectRatio &&
-            maximumDimension <=
-                options.MaximumTerminalLengthPixels &&
-            minimumDimension <=
-                options.MaximumPinThicknessPixels)
-        {
-            return SchematicElectricalNodeKind.Terminal;
-        }
-
-        if (component.Type ==
-            BoardGeometryComponentType.Copper)
-        {
-            return SchematicElectricalNodeKind.Wire;
-        }
-
-        return SchematicElectricalNodeKind.Unknown;
-    }
-
-    /// <summary>
-    /// Calcula el radio necesario para descubrir todas las conexiones
-    /// plausibles de un nodo.
     /// </summary>
     private static double ResolveSearchRadius(
         SchematicElectricalNode node,
