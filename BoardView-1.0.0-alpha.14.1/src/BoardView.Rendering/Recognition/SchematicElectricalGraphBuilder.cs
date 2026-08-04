@@ -17,12 +17,14 @@ public sealed class SchematicElectricalGraphBuilder
     private readonly SchematicPrimitiveClassifier primitiveClassifier;
     private readonly SchematicPinConnector pinConnector;
     private readonly SchematicWireAssembler wireAssembler;
+    private readonly SchematicJunctionBuilder junctionBuilder;
 
     public SchematicElectricalGraphBuilder()
         : this(
             new SchematicPrimitiveClassifier(),
             new SchematicPinConnector(),
-            new SchematicWireAssembler())
+            new SchematicWireAssembler(),
+            new SchematicJunctionBuilder())
     {
     }
 
@@ -31,7 +33,8 @@ public sealed class SchematicElectricalGraphBuilder
         : this(
             primitiveClassifier,
             new SchematicPinConnector(),
-            new SchematicWireAssembler())
+            new SchematicWireAssembler(),
+            new SchematicJunctionBuilder())
     {
     }
 
@@ -41,7 +44,8 @@ public sealed class SchematicElectricalGraphBuilder
         : this(
             primitiveClassifier,
             pinConnector,
-            new SchematicWireAssembler())
+            new SchematicWireAssembler(),
+            new SchematicJunctionBuilder())
     {
     }
 
@@ -49,6 +53,19 @@ public sealed class SchematicElectricalGraphBuilder
         SchematicPrimitiveClassifier primitiveClassifier,
         SchematicPinConnector pinConnector,
         SchematicWireAssembler wireAssembler)
+        : this(
+            primitiveClassifier,
+            pinConnector,
+            wireAssembler,
+            new SchematicJunctionBuilder())
+    {
+    }
+
+    public SchematicElectricalGraphBuilder(
+        SchematicPrimitiveClassifier primitiveClassifier,
+        SchematicPinConnector pinConnector,
+        SchematicWireAssembler wireAssembler,
+        SchematicJunctionBuilder junctionBuilder)
     {
         this.primitiveClassifier =
             primitiveClassifier ??
@@ -61,6 +78,10 @@ public sealed class SchematicElectricalGraphBuilder
         this.wireAssembler =
             wireAssembler ??
             throw new ArgumentNullException(nameof(wireAssembler));
+
+        this.junctionBuilder =
+            junctionBuilder ??
+            throw new ArgumentNullException(nameof(junctionBuilder));
     }
 
     /// <summary>
@@ -257,10 +278,15 @@ public sealed class SchematicElectricalGraphBuilder
         normalizedEdges.AddRange(
             assembledWireEdges);
 
-        AddExplicitJunctionConnections(
-            nodes,
-            normalizedEdges,
-            options);
+        IReadOnlyList<SchematicElectricalEdge> junctionEdges =
+            junctionBuilder.Build(
+                nodes,
+                normalizedEdges,
+                options,
+                cancellationToken);
+
+        normalizedEdges.AddRange(
+            junctionEdges);
 
         RecoverBodyTerminalConnections(
             nodes,
