@@ -379,6 +379,7 @@ public sealed class GeometryRenderPipeline : IDisposable
             SchematicElectricalGraph electricalGraph =
                 electricalGraphBuilder.Build(
                     geometryIndex,
+                    textObservations,
                     options.SchematicSymbolAssemblerOptions
                         .ElectricalGraphBuilderOptions,
                     cancellationToken);
