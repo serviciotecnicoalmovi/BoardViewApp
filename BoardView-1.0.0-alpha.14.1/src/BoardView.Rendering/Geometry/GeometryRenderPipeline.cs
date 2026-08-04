@@ -1231,7 +1231,10 @@ public sealed record GeometryRenderResult(
         if (SchematicComponents.TryGetByReference(
                 reference,
                 out SchematicGraphComponent? reconstructedComponent) &&
-            reconstructedComponent is not null)
+            reconstructedComponent is not null &&
+            IsReconstructedSelectionValid(
+                reference,
+                reconstructedComponent.Bounds))
         {
             bounds =
                 reconstructedComponent.Bounds;
@@ -1265,6 +1268,131 @@ public sealed record GeometryRenderResult(
             default;
 
         return false;
+    }
+
+    /// <summary>
+    /// Verifica que los límites reconstruidos permanezcan en la vecindad de la
+    /// referencia textual y del ancla geométrica original.
+    /// </summary>
+    /// <remarks>
+    /// Un componente conectado a una red extensa puede producir una caja válida
+    /// desde el punto de vista topológico, pero incorrecta para navegación
+    /// visual. En ese caso se descarta y se continúa con SchematicSymbol.Bounds.
+    /// </remarks>
+    private bool IsReconstructedSelectionValid(
+        string reference,
+        BoardGeometryBounds reconstructedBounds)
+    {
+        if (reconstructedBounds.Width <= 0 ||
+            reconstructedBounds.Height <= 0)
+        {
+            return false;
+        }
+
+        if (!TryFindReference(
+                reference,
+                out BoardReferenceEntry? entry,
+                out BoardGeometryIndexedComponent? anchorComponent) ||
+            entry is null ||
+            anchorComponent is null)
+        {
+            return false;
+        }
+
+        BoardGeometryBounds candidateBounds =
+            entry.Candidate.Bounds;
+
+        BoardGeometryBounds anchorBounds =
+            anchorComponent.Bounds;
+
+        double distanceToCandidate =
+            DistanceBetweenBounds(
+                reconstructedBounds,
+                candidateBounds);
+
+        double distanceToAnchor =
+            DistanceBetweenBounds(
+                reconstructedBounds,
+                anchorBounds);
+
+        double referenceScale =
+            Math.Max(
+                1D,
+                Math.Max(
+                    candidateBounds.Width,
+                    candidateBounds.Height));
+
+        double anchorScale =
+            Math.Max(
+                1D,
+                Math.Max(
+                    anchorBounds.Width,
+                    anchorBounds.Height));
+
+        double maximumCandidateDistance =
+            Math.Clamp(
+                referenceScale * 14D,
+                72D,
+                260D);
+
+        double maximumAnchorDistance =
+            Math.Clamp(
+                anchorScale * 8D,
+                64D,
+                220D);
+
+        double maximumWidth =
+            Math.Clamp(
+                Math.Max(
+                    referenceScale,
+                    anchorScale) *
+                14D,
+                96D,
+                720D);
+
+        double maximumHeight =
+            Math.Clamp(
+                Math.Max(
+                    referenceScale,
+                    anchorScale) *
+                18D,
+                120D,
+                900D);
+
+        return distanceToCandidate <=
+                   maximumCandidateDistance &&
+               distanceToAnchor <=
+                   maximumAnchorDistance &&
+               reconstructedBounds.Width <=
+                   maximumWidth &&
+               reconstructedBounds.Height <=
+                   maximumHeight;
+    }
+
+    /// <summary>
+    /// Calcula la separación mínima entre dos cajas rectangulares.
+    /// </summary>
+    private static double DistanceBetweenBounds(
+        BoardGeometryBounds first,
+        BoardGeometryBounds second)
+    {
+        double horizontalDistance =
+            first.Right < second.Left
+                ? second.Left - first.Right
+                : second.Right < first.Left
+                    ? first.Left - second.Right
+                    : 0D;
+
+        double verticalDistance =
+            first.Bottom < second.Top
+                ? second.Top - first.Bottom
+                : second.Bottom < first.Top
+                    ? first.Top - second.Bottom
+                    : 0D;
+
+        return Math.Sqrt(
+            horizontalDistance * horizontalDistance +
+            verticalDistance * verticalDistance);
     }
 
     /// <summary>
