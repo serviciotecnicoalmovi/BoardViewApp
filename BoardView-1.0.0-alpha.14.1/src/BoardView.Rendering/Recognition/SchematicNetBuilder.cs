@@ -1,28 +1,38 @@
 namespace BoardView.Rendering.Recognition;
 
 /// <summary>
-/// Consolida las aristas topológicas en redes conductoras transitables.
+/// Consolida las relaciones topológicas verificadas en componentes eléctricas
+/// transitables por el BFS.
 /// </summary>
 /// <remarks>
-/// El BFS del ensamblador exige una confianza superior para continuar por
-/// cadenas Wire → Wire. Los detectores geométricos pueden producir conexiones
-/// correctas con una confianza conservadora. Esta etapa confirma dichas
-/// conexiones mediante su tipo, distancia y roles eléctricos, elimina
-/// duplicados y eleva únicamente las aristas topológicamente verificadas.
+/// El contrato actual de <see cref="SchematicElectricalGraph"/> conserva
+/// exclusivamente nodos geométricos reales o terminales recuperados. Por esa
+/// razón esta clase no introduce un nodo sintético <c>Net</c>.
 ///
-/// No crea conexiones nuevas por proximidad y no une cuerpos de símbolos.
+/// Cada red queda representada como una componente conexa formada por:
+/// <list type="bullet">
+/// <item>Wire;</item>
+/// <item>Pin;</item>
+/// <item>Terminal;</item>
+/// <item>Junction;</item>
+/// <item>Ground;</item>
+/// <item>PowerPort.</item>
+/// </list>
+///
+/// La clase elimina aristas duplicadas, conserva la relación más confiable y
+/// eleva la confianza únicamente de conexiones ya demostradas por contacto,
+/// intersección o continuidad colineal. No conecta elementos por proximidad.
 /// </remarks>
 public sealed class SchematicNetBuilder
 {
-    /// <summary>
-    /// Confianza mínima asignada a una continuidad conductora verificada.
-    /// Debe permanecer por encima del umbral de cadenas Wire → Wire utilizado
-    /// por SchematicSymbolAssembler.
-    /// </summary>
-    private const double VerifiedConductorConfidence = 0.78D;
+    private const double VerifiedTopologyConfidence = 0.82D;
+    private const double VerifiedPinConfidence = 0.88D;
+    private const double VerifiedJunctionConfidence = 0.90D;
+    private const double VerifiedPowerConfidence = 0.86D;
 
     /// <summary>
-    /// Normaliza las aristas del grafo y consolida componentes conductoras.
+    /// Consolida las redes eléctricas y devuelve la colección definitiva de
+    /// aristas del grafo.
     /// </summary>
     public IReadOnlyList<SchematicElectricalEdge> Build(
         IReadOnlyList<SchematicElectricalNode> nodes,
@@ -34,16 +44,22 @@ public sealed class SchematicNetBuilder
         ArgumentNullException.ThrowIfNull(edges);
         ArgumentNullException.ThrowIfNull(options);
 
-        if (edges.Count == 0)
+        if (nodes.Count == 0 ||
+            edges.Count == 0)
         {
-            return Array.Empty<SchematicElectricalEdge>();
+            return edges
+                .OrderBy(edge => edge.FirstNodeId)
+                .ThenBy(edge => edge.SecondNodeId)
+                .ToArray();
         }
 
         IReadOnlyDictionary<int, SchematicElectricalNode> nodesById =
             nodes.ToDictionary(node => node.Id);
 
         var bestByPair =
-            new Dictionary<(int First, int Second), SchematicElectricalEdge>();
+            new Dictionary<
+                (int FirstNodeId, int SecondNodeId),
+                SchematicElectricalEdge>();
 
         foreach (SchematicElectricalEdge edge in edges)
         {
@@ -66,177 +82,150 @@ public sealed class SchematicNetBuilder
                     edge,
                     options);
 
-            var pair =
+            var key =
                 (
                     normalized.FirstNodeId,
                     normalized.SecondNodeId);
 
             if (!bestByPair.TryGetValue(
-                    pair,
-                    out SchematicElectricalEdge? existing) ||
-                IsBetter(normalized, existing))
+                    key,
+                    out SchematicElectricalEdge? current) ||
+                IsBetter(
+                    normalized,
+                    current))
             {
-                bestByPair[pair] = normalized;
+                bestByPair[key] =
+                    normalized;
             }
         }
 
-        /*
-         * Las componentes se calculan para validar que la normalización no
-         * produzca nodos aislados artificiales. No se crea un nodo Net
-         * sintético porque el contrato actual del grafo conserva únicamente
-         * geometrías reales del PDF.
-         */
-        IReadOnlyList<SchematicElectricalEdge> normalizedEdges =
+        SchematicElectricalEdge[] normalizedEdges =
             bestByPair
                 .Values
                 .OrderBy(edge => edge.FirstNodeId)
                 .ThenBy(edge => edge.SecondNodeId)
                 .ToArray();
 
-        ValidateConductorComponents(
+        /*
+         * La segunda pasada trabaja por componente conexa. Esto permite
+         * confirmar una cadena completa sin crear conexiones nuevas.
+         */
+        PromoteConnectedNetworks(
             nodesById,
             normalizedEdges,
+            options,
             cancellationToken);
 
-        return normalizedEdges;
+        return normalizedEdges
+            .OrderBy(edge => edge.FirstNodeId)
+            .ThenBy(edge => edge.SecondNodeId)
+            .ToArray();
     }
 
-    /// <summary>
-    /// Eleva la confianza sólo cuando una conexión conductora ya fue probada
-    /// por una regla topológica fuerte.
-    /// </summary>
     private static SchematicElectricalEdge NormalizeEdge(
         SchematicElectricalNode first,
         SchematicElectricalNode second,
         SchematicElectricalEdge edge,
         SchematicElectricalGraphBuilderOptions options)
     {
-        if (!IsConductor(first) ||
-            !IsConductor(second))
+        if (!IsTopologyNode(first) ||
+            !IsTopologyNode(second) ||
+            !IsVerifiedTopologyKind(edge.Kind))
         {
             return edge;
         }
 
-        bool verifiedKind =
-            edge.Kind is
-                SchematicElectricalEdgeKind.EndpointContact or
-                SchematicElectricalEdgeKind.CollinearGap or
-                SchematicElectricalEdgeKind.BoundsIntersection or
-                SchematicElectricalEdgeKind.BoundsTouch;
-
-        if (!verifiedKind)
+        if (!IsDistanceCompatible(
+                first,
+                second,
+                edge,
+                options))
         {
             return edge;
         }
 
-        double allowedDistance =
-            edge.Kind switch
-            {
-                SchematicElectricalEdgeKind.CollinearGap =>
-                    options.MaximumCollinearGapPixels,
-
-                SchematicElectricalEdgeKind.EndpointContact =>
-                    Math.Max(
-                        options.EndpointTolerancePixels,
-                        options.EndpointToSegmentTolerancePixels),
-
-                SchematicElectricalEdgeKind.BoundsTouch =>
-                    options.TouchTolerancePixels,
-
-                SchematicElectricalEdgeKind.BoundsIntersection =>
-                    0D,
-
-                _ =>
-                    0D
-            };
-
-        if (edge.DistancePixels >
-            allowedDistance +
-            Math.Max(
-                1D,
-                Math.Min(
-                    MinimumDimension(first),
-                    MinimumDimension(second)) *
-                0.50D))
-        {
-            return edge;
-        }
-
-        double roleBonus =
-            CalculateRoleBonus(
+        double minimumConfidence =
+            ResolveVerifiedConfidence(
                 first,
                 second);
 
-        double promotedConfidence =
+        double confidence =
             Clamp01(
                 Math.Max(
                     edge.Confidence,
-                    VerifiedConductorConfidence +
-                    roleBonus));
+                    minimumConfidence));
 
         if (Math.Abs(
-                promotedConfidence -
+                confidence -
                 edge.Confidence) <
             0.000001D)
         {
             return edge;
         }
 
-        return new SchematicElectricalEdge(
-            edge.FirstNodeId,
-            edge.SecondNodeId,
-            edge.Kind,
-            promotedConfidence,
-            edge.DistancePixels,
-            edge.ContactX,
-            edge.ContactY);
+        return CopyWithConfidence(
+            edge,
+            confidence);
     }
 
     /// <summary>
-    /// Calcula las redes como componentes conexas de conductores. La validación
-    /// es deliberadamente no destructiva.
+    /// Confirma transitividad dentro de cada red ya conectada. Sólo modifica
+    /// la confianza de las aristas existentes.
     /// </summary>
-    private static void ValidateConductorComponents(
+    private static void PromoteConnectedNetworks(
         IReadOnlyDictionary<int, SchematicElectricalNode> nodesById,
-        IReadOnlyList<SchematicElectricalEdge> edges,
+        SchematicElectricalEdge[] edges,
+        SchematicElectricalGraphBuilderOptions options,
         CancellationToken cancellationToken)
     {
-        var adjacency =
+        var edgeIndexesByNode =
             new Dictionary<int, List<int>>();
 
-        foreach (SchematicElectricalEdge edge in edges)
+        for (int edgeIndex = 0;
+             edgeIndex < edges.Length;
+             edgeIndex++)
         {
+            SchematicElectricalEdge edge =
+                edges[edgeIndex];
+
             if (!nodesById.TryGetValue(
                     edge.FirstNodeId,
                     out SchematicElectricalNode? first) ||
                 !nodesById.TryGetValue(
                     edge.SecondNodeId,
                     out SchematicElectricalNode? second) ||
-                !IsConductor(first) ||
-                !IsConductor(second))
+                !IsTopologyNode(first) ||
+                !IsTopologyNode(second) ||
+                !IsVerifiedTopologyKind(edge.Kind) ||
+                !IsDistanceCompatible(
+                    first,
+                    second,
+                    edge,
+                    options))
             {
                 continue;
             }
 
-            AddNeighbor(
-                adjacency,
+            AddEdgeIndex(
+                edgeIndexesByNode,
                 first.Id,
-                second.Id);
+                edgeIndex);
 
-            AddNeighbor(
-                adjacency,
+            AddEdgeIndex(
+                edgeIndexesByNode,
                 second.Id,
-                first.Id);
+                edgeIndex);
         }
 
         var visited =
             new HashSet<int>();
 
-        foreach (int nodeId in adjacency.Keys)
+        foreach (int startNodeId in
+                 edgeIndexesByNode.Keys.OrderBy(id => id))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!visited.Add(nodeId))
+            if (!visited.Add(startNodeId))
             {
                 continue;
             }
@@ -244,45 +233,264 @@ public sealed class SchematicNetBuilder
             var queue =
                 new Queue<int>();
 
-            queue.Enqueue(nodeId);
+            var componentEdgeIndexes =
+                new HashSet<int>();
+
+            var componentNodeIds =
+                new HashSet<int>
+                {
+                    startNodeId
+                };
+
+            queue.Enqueue(startNodeId);
 
             while (queue.Count > 0)
             {
-                int current =
+                int currentNodeId =
                     queue.Dequeue();
 
-                if (!adjacency.TryGetValue(
-                        current,
-                        out List<int>? neighbors))
+                if (!edgeIndexesByNode.TryGetValue(
+                        currentNodeId,
+                        out List<int>? currentEdges))
                 {
                     continue;
                 }
 
-                foreach (int neighbor in neighbors)
+                foreach (int edgeIndex in currentEdges)
                 {
-                    if (visited.Add(neighbor))
+                    componentEdgeIndexes.Add(edgeIndex);
+
+                    SchematicElectricalEdge edge =
+                        edges[edgeIndex];
+
+                    int neighborId =
+                        edge.GetOtherNodeId(
+                            currentNodeId);
+
+                    componentNodeIds.Add(neighborId);
+
+                    if (visited.Add(neighborId))
                     {
-                        queue.Enqueue(neighbor);
+                        queue.Enqueue(neighborId);
                     }
                 }
+            }
+
+            PromoteComponent(
+                componentNodeIds,
+                componentEdgeIndexes,
+                nodesById,
+                edges);
+        }
+    }
+
+    private static void PromoteComponent(
+        IReadOnlySet<int> componentNodeIds,
+        IReadOnlySet<int> componentEdgeIndexes,
+        IReadOnlyDictionary<int, SchematicElectricalNode> nodesById,
+        SchematicElectricalEdge[] edges)
+    {
+        bool containsJunction =
+            componentNodeIds
+                .Select(nodeId => nodesById[nodeId])
+                .Any(node =>
+                    node.Kind ==
+                    SchematicElectricalNodeKind.Junction);
+
+        bool containsPinOrTerminal =
+            componentNodeIds
+                .Select(nodeId => nodesById[nodeId])
+                .Any(node =>
+                    node.Kind is
+                        SchematicElectricalNodeKind.Pin or
+                        SchematicElectricalNodeKind.Terminal);
+
+        bool containsPowerEndpoint =
+            componentNodeIds
+                .Select(nodeId => nodesById[nodeId])
+                .Any(node =>
+                    node.Kind is
+                        SchematicElectricalNodeKind.Ground or
+                        SchematicElectricalNodeKind.PowerPort);
+
+        double componentFloor =
+            VerifiedTopologyConfidence;
+
+        if (containsPinOrTerminal)
+        {
+            componentFloor =
+                Math.Max(
+                    componentFloor,
+                    VerifiedPinConfidence);
+        }
+
+        if (containsJunction)
+        {
+            componentFloor =
+                Math.Max(
+                    componentFloor,
+                    VerifiedJunctionConfidence);
+        }
+
+        if (containsPowerEndpoint)
+        {
+            componentFloor =
+                Math.Max(
+                    componentFloor,
+                    VerifiedPowerConfidence);
+        }
+
+        foreach (int edgeIndex in componentEdgeIndexes)
+        {
+            SchematicElectricalEdge edge =
+                edges[edgeIndex];
+
+            SchematicElectricalNode first =
+                nodesById[edge.FirstNodeId];
+
+            SchematicElectricalNode second =
+                nodesById[edge.SecondNodeId];
+
+            double pairFloor =
+                ResolveVerifiedConfidence(
+                    first,
+                    second);
+
+            double confidence =
+                Clamp01(
+                    Math.Max(
+                        edge.Confidence,
+                        Math.Min(
+                            componentFloor,
+                            pairFloor + 0.04D)));
+
+            if (confidence >
+                edge.Confidence +
+                0.000001D)
+            {
+                edges[edgeIndex] =
+                    CopyWithConfidence(
+                        edge,
+                        confidence);
             }
         }
     }
 
-    private static void AddNeighbor(
-        IDictionary<int, List<int>> adjacency,
-        int nodeId,
-        int neighborId)
+    private static bool IsDistanceCompatible(
+        SchematicElectricalNode first,
+        SchematicElectricalNode second,
+        SchematicElectricalEdge edge,
+        SchematicElectricalGraphBuilderOptions options)
     {
-        if (!adjacency.TryGetValue(
-                nodeId,
-                out List<int>? neighbors))
+        double thicknessAllowance =
+            Math.Max(
+                1D,
+                Math.Min(
+                    MinimumDimension(first),
+                    MinimumDimension(second)) *
+                0.60D);
+
+        double maximumDistance =
+            edge.Kind switch
+            {
+                SchematicElectricalEdgeKind.BoundsIntersection =>
+                    thicknessAllowance,
+
+                SchematicElectricalEdgeKind.BoundsTouch =>
+                    options.TouchTolerancePixels +
+                    thicknessAllowance,
+
+                SchematicElectricalEdgeKind.EndpointContact =>
+                    Math.Max(
+                        options.EndpointTolerancePixels,
+                        options.EndpointToSegmentTolerancePixels) +
+                    thicknessAllowance,
+
+                SchematicElectricalEdgeKind.CollinearGap =>
+                    options.MaximumCollinearGapPixels +
+                    thicknessAllowance,
+
+                _ =>
+                    -1D
+            };
+
+        return maximumDistance >= 0D &&
+               edge.DistancePixels <=
+               maximumDistance;
+    }
+
+    private static double ResolveVerifiedConfidence(
+        SchematicElectricalNode first,
+        SchematicElectricalNode second)
+    {
+        if (first.Kind ==
+                SchematicElectricalNodeKind.Junction ||
+            second.Kind ==
+                SchematicElectricalNodeKind.Junction)
         {
-            neighbors = [];
-            adjacency[nodeId] = neighbors;
+            return VerifiedJunctionConfidence;
         }
 
-        neighbors.Add(neighborId);
+        if (first.Kind is
+                SchematicElectricalNodeKind.Ground or
+                SchematicElectricalNodeKind.PowerPort ||
+            second.Kind is
+                SchematicElectricalNodeKind.Ground or
+                SchematicElectricalNodeKind.PowerPort)
+        {
+            return VerifiedPowerConfidence;
+        }
+
+        if (first.Kind is
+                SchematicElectricalNodeKind.Pin or
+                SchematicElectricalNodeKind.Terminal ||
+            second.Kind is
+                SchematicElectricalNodeKind.Pin or
+                SchematicElectricalNodeKind.Terminal)
+        {
+            return VerifiedPinConfidence;
+        }
+
+        return VerifiedTopologyConfidence;
+    }
+
+    private static bool IsTopologyNode(
+        SchematicElectricalNode node)
+    {
+        return node.Kind is
+            SchematicElectricalNodeKind.Wire or
+            SchematicElectricalNodeKind.Pin or
+            SchematicElectricalNodeKind.Terminal or
+            SchematicElectricalNodeKind.Junction or
+            SchematicElectricalNodeKind.Ground or
+            SchematicElectricalNodeKind.PowerPort;
+    }
+
+    private static bool IsVerifiedTopologyKind(
+        SchematicElectricalEdgeKind kind)
+    {
+        return kind is
+            SchematicElectricalEdgeKind.BoundsIntersection or
+            SchematicElectricalEdgeKind.BoundsTouch or
+            SchematicElectricalEdgeKind.EndpointContact or
+            SchematicElectricalEdgeKind.CollinearGap;
+    }
+
+    private static void AddEdgeIndex(
+        IDictionary<int, List<int>> edgeIndexesByNode,
+        int nodeId,
+        int edgeIndex)
+    {
+        if (!edgeIndexesByNode.TryGetValue(
+                nodeId,
+                out List<int>? edgeIndexes))
+        {
+            edgeIndexes = [];
+            edgeIndexesByNode[nodeId] =
+                edgeIndexes;
+        }
+
+        edgeIndexes.Add(edgeIndex);
     }
 
     private static bool IsBetter(
@@ -301,7 +509,8 @@ public sealed class SchematicNetBuilder
                 current.Confidence) <
             0.000001D &&
             candidate.DistancePixels <
-            current.DistancePixels)
+            current.DistancePixels -
+            0.000001D)
         {
             return true;
         }
@@ -309,58 +518,18 @@ public sealed class SchematicNetBuilder
         return false;
     }
 
-    private static bool IsConductor(
-        SchematicElectricalNode node)
+    private static SchematicElectricalEdge CopyWithConfidence(
+        SchematicElectricalEdge edge,
+        double confidence)
     {
-        return node.Kind is
-            SchematicElectricalNodeKind.Wire or
-            SchematicElectricalNodeKind.Pin or
-            SchematicElectricalNodeKind.Terminal;
-    }
-
-    private static double CalculateRoleBonus(
-        SchematicElectricalNode first,
-        SchematicElectricalNode second)
-    {
-        bool pinWire =
-            (first.Kind ==
-                 SchematicElectricalNodeKind.Pin &&
-             second.Kind ==
-                 SchematicElectricalNodeKind.Wire) ||
-            (second.Kind ==
-                 SchematicElectricalNodeKind.Pin &&
-             first.Kind ==
-                 SchematicElectricalNodeKind.Wire);
-
-        if (pinWire)
-        {
-            return 0.06D;
-        }
-
-        bool terminalWire =
-            (first.Kind ==
-                 SchematicElectricalNodeKind.Terminal &&
-             second.Kind ==
-                 SchematicElectricalNodeKind.Wire) ||
-            (second.Kind ==
-                 SchematicElectricalNodeKind.Terminal &&
-             first.Kind ==
-                 SchematicElectricalNodeKind.Wire);
-
-        if (terminalWire)
-        {
-            return 0.05D;
-        }
-
-        if (first.Kind ==
-                SchematicElectricalNodeKind.Wire &&
-            second.Kind ==
-                SchematicElectricalNodeKind.Wire)
-        {
-            return 0.03D;
-        }
-
-        return 0.02D;
+        return new SchematicElectricalEdge(
+            edge.FirstNodeId,
+            edge.SecondNodeId,
+            edge.Kind,
+            Clamp01(confidence),
+            edge.DistancePixels,
+            edge.ContactX,
+            edge.ContactY);
     }
 
     private static double MinimumDimension(
