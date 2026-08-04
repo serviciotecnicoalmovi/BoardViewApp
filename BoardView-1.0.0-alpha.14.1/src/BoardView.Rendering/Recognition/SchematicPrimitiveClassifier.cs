@@ -7,12 +7,27 @@ namespace BoardView.Rendering.Recognition;
 /// por el constructor del grafo esquemático.
 /// </summary>
 /// <remarks>
-/// Esta clase concentra la interpretación geométrica que antes estaba embebida
-/// en <see cref="SchematicElectricalGraphBuilder"/>. No crea conexiones ni
-/// recorre el grafo; únicamente describe la primitiva observada.
+/// La clasificación lineal se delega a <see cref="SchematicWireDetector"/>.
+/// Esta clase conserva la decisión global entre cuerpo, conductor, unión,
+/// perforación, pad y geometría desconocida.
 /// </remarks>
 public sealed class SchematicPrimitiveClassifier
 {
+    private readonly SchematicWireDetector wireDetector;
+
+    public SchematicPrimitiveClassifier()
+        : this(new SchematicWireDetector())
+    {
+    }
+
+    public SchematicPrimitiveClassifier(
+        SchematicWireDetector wireDetector)
+    {
+        this.wireDetector =
+            wireDetector ??
+            throw new ArgumentNullException(nameof(wireDetector));
+    }
+
     /// <summary>
     /// Clasifica una geometría utilizando la configuración del grafo.
     /// </summary>
@@ -35,122 +50,146 @@ public sealed class SchematicPrimitiveClassifier
         SchematicPrimitiveOrientation orientation =
             ResolveOrientation(width, height);
 
-        SchematicElectricalNodeKind kind;
-        string reason;
-        double confidence;
+        if (component.Type == BoardGeometryComponentType.Hole)
+        {
+            return CreateClassification(
+                component,
+                SchematicElectricalNodeKind.Hole,
+                orientation,
+                component.Confidence,
+                CreateEndpoints(bounds, orientation),
+                "Componente clasificado como perforación.");
+        }
+
+        SchematicWireDetection wire =
+            wireDetector.Detect(component, options);
+
+        /*
+         * La firma lineal se evalúa antes de aceptar ComponentBody. En PDFs
+         * esquemáticos, el clasificador geométrico base puede etiquetar líneas
+         * largas y placas de símbolos como ComponentBody.
+         */
+        if (wire.IsDetected)
+        {
+            return CreateClassification(
+                component,
+                wire.Kind,
+                wire.Orientation,
+                wire.Confidence,
+                wire.Endpoints,
+                wire.Reason);
+        }
 
         if (component.Type == BoardGeometryComponentType.ComponentBody)
         {
-            kind = SchematicElectricalNodeKind.SymbolBody;
-            reason = "Componente clasificado como cuerpo por el kernel geométrico.";
-            confidence = component.Confidence;
+            return CreateClassification(
+                component,
+                SchematicElectricalNodeKind.SymbolBody,
+                orientation,
+                component.Confidence,
+                CreateEndpoints(bounds, orientation),
+                "Componente no lineal clasificado como cuerpo por el kernel geométrico.");
         }
-        else if (component.Type == BoardGeometryComponentType.Hole)
-        {
-            kind = SchematicElectricalNodeKind.Hole;
-            reason = "Componente clasificado como perforación.";
-            confidence = component.Confidence;
-        }
-        else if (component.Type == BoardGeometryComponentType.Pad)
+
+        if (component.Type == BoardGeometryComponentType.Pad)
         {
             bool compactJunction =
                 area <= options.MaximumJunctionAreaPixels &&
                 aspectRatio <= options.MaximumJunctionAspectRatio;
 
-            kind = compactJunction
-                ? SchematicElectricalNodeKind.Junction
-                : SchematicElectricalNodeKind.Pad;
-
-            reason = compactJunction
-                ? "Pad compacto compatible con nodo de unión."
-                : "Pad geométrico no compatible con unión compacta.";
-
-            confidence = compactJunction
-                ? Math.Max(component.Confidence, 0.72D)
-                : component.Confidence;
+            return CreateClassification(
+                component,
+                compactJunction
+                    ? SchematicElectricalNodeKind.Junction
+                    : SchematicElectricalNodeKind.Pad,
+                orientation,
+                compactJunction
+                    ? Math.Max(component.Confidence, 0.72D)
+                    : component.Confidence,
+                CreateEndpoints(bounds, orientation),
+                compactJunction
+                    ? "Pad compacto compatible con nodo de unión."
+                    : "Pad geométrico no compatible con unión compacta.");
         }
-        else
+
+        if (area <= options.MaximumJunctionAreaPixels &&
+            aspectRatio <= options.MaximumJunctionAspectRatio)
         {
-            bool thinLinearGeometry =
-                minimumDimension <= options.MaximumWireThicknessPixels &&
-                aspectRatio >= options.MinimumWireAspectRatio;
+            double densityScore =
+                CalculateCompactDensityScore(component.Density);
 
-            if (thinLinearGeometry)
-            {
-                bool shortLinearGeometry =
-                    maximumDimension <= options.MaximumPinLengthPixels;
+            double confidence = Clamp01(
+                component.Confidence * 0.58D +
+                densityScore * 0.42D);
 
-                kind = shortLinearGeometry
-                    ? SchematicElectricalNodeKind.Pin
-                    : SchematicElectricalNodeKind.Wire;
-
-                reason = shortLinearGeometry
-                    ? "Geometría lineal corta compatible con pin."
-                    : "Geometría lineal larga compatible con segmento conductor.";
-
-                confidence = CalculateLinearConfidence(
-                    component,
-                    aspectRatio,
-                    minimumDimension,
-                    options);
-            }
-            else if (area <= options.MaximumJunctionAreaPixels &&
-                     aspectRatio <= options.MaximumJunctionAspectRatio)
-            {
-                kind = SchematicElectricalNodeKind.Junction;
-                reason = "Geometría compacta compatible con unión eléctrica.";
-                confidence = Math.Max(component.Confidence, 0.58D);
-            }
-            else if (aspectRatio >= options.MinimumTerminalAspectRatio &&
-                     maximumDimension <= options.MaximumTerminalLengthPixels &&
-                     minimumDimension <= options.MaximumPinThicknessPixels)
-            {
-                kind = SchematicElectricalNodeKind.Terminal;
-                reason = "Geometría lineal intermedia compatible con terminal.";
-                confidence = Math.Max(component.Confidence, 0.62D);
-            }
-            else if (component.Type == BoardGeometryComponentType.Copper)
-            {
-                kind = SchematicElectricalNodeKind.Wire;
-                reason = "Cobre no lineal conservado como conductor.";
-                confidence = Math.Max(component.Confidence, 0.50D);
-            }
-            else
-            {
-                kind = SchematicElectricalNodeKind.Unknown;
-                reason = "La geometría no satisface una firma eléctrica estable.";
-                confidence = component.Confidence * 0.65D;
-            }
+            return CreateClassification(
+                component,
+                SchematicElectricalNodeKind.Junction,
+                orientation,
+                Math.Max(confidence, 0.56D),
+                CreateEndpoints(bounds, orientation),
+                "Geometría compacta con densidad compatible con unión eléctrica.");
         }
 
+        if (component.Type == BoardGeometryComponentType.Copper)
+        {
+            return CreateClassification(
+                component,
+                SchematicElectricalNodeKind.Wire,
+                orientation,
+                Math.Max(component.Confidence, 0.50D),
+                CreateEndpoints(bounds, orientation),
+                "Cobre no lineal conservado como conductor eléctrico.");
+        }
+
+        return CreateClassification(
+            component,
+            SchematicElectricalNodeKind.Unknown,
+            orientation,
+            component.Confidence * 0.65D,
+            CreateEndpoints(bounds, orientation),
+            "La geometría no satisface una firma eléctrica estable.");
+    }
+
+    private static SchematicPrimitiveClassification CreateClassification(
+        BoardGeometryIndexedComponent component,
+        SchematicElectricalNodeKind kind,
+        SchematicPrimitiveOrientation orientation,
+        double confidence,
+        IReadOnlyList<SchematicPrimitiveEndpoint> endpoints,
+        string reason)
+    {
         return new SchematicPrimitiveClassification(
             component,
             kind,
             orientation,
             Clamp01(confidence),
-            CreateEndpoints(bounds, orientation),
+            endpoints,
             reason);
     }
 
-    private static double CalculateLinearConfidence(
-        BoardGeometryIndexedComponent component,
-        double aspectRatio,
-        double thickness,
-        SchematicElectricalGraphBuilderOptions options)
+    private static double CalculateCompactDensityScore(double density)
     {
-        double aspectScore = Clamp01(
-            aspectRatio /
-            Math.Max(1D, options.MinimumWireAspectRatio * 2D));
+        if (!double.IsFinite(density))
+        {
+            return 0D;
+        }
 
-        double thicknessScore = Clamp01(
-            1D -
-            (thickness /
-             Math.Max(1D, options.MaximumWireThicknessPixels * 1.35D)));
+        /*
+         * Los puntos de unión suelen ser compactos y relativamente densos,
+         * pero no se exige un relleno perfecto para tolerar antialiasing.
+         */
+        if (density >= 0.28D && density <= 1D)
+        {
+            return 1D;
+        }
 
-        return Clamp01(
-            component.Confidence * 0.50D +
-            aspectScore * 0.30D +
-            thicknessScore * 0.20D);
+        if (density >= 0.12D)
+        {
+            return 0.64D;
+        }
+
+        return 0.22D;
     }
 
     private static SchematicPrimitiveOrientation ResolveOrientation(
