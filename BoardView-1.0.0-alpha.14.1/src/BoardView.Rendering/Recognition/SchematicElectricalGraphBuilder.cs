@@ -141,12 +141,377 @@ public sealed class SchematicElectricalGraphBuilder
             }
         }
 
+        IReadOnlyList<SchematicElectricalEdge> normalizedEdges =
+            NormalizeTopology(
+                nodes,
+                edges,
+                options);
+
         return new SchematicElectricalGraph(
             geometryIndex.PageWidth,
             geometryIndex.PageHeight,
             nodes,
-            edges);
+            normalizedEdges);
     }
+
+    /// <summary>
+    /// Normaliza la topología después de evaluar las relaciones locales.
+    /// </summary>
+    /// <remarks>
+    /// Esta pasada resuelve tres ambigüedades que no pueden decidirse
+    /// correctamente observando una pareja aislada:
+    ///
+    /// <list type="bullet">
+    /// <item>un pin o terminal pertenece a un único cuerpo principal;</item>
+    /// <item>un cuerpo no debe conectarse directamente a una red cuando existe
+    /// un pin intermedio que representa esa unión;</item>
+    /// <item>una unión compacta débil no debe fusionar redes por sí sola.</item>
+    /// </list>
+    /// </remarks>
+    private static IReadOnlyList<SchematicElectricalEdge> NormalizeTopology(
+        IReadOnlyList<SchematicElectricalNode> nodes,
+        IReadOnlyList<SchematicElectricalEdge> edges,
+        SchematicElectricalGraphBuilderOptions options)
+    {
+        if (edges.Count == 0)
+        {
+            return Array.Empty<SchematicElectricalEdge>();
+        }
+
+        IReadOnlyDictionary<int, SchematicElectricalNode> nodesById =
+            nodes.ToDictionary(
+                node =>
+                    node.Id);
+
+        var retained =
+            new HashSet<SchematicElectricalEdge>(
+                edges);
+
+        ResolveExclusiveBodyOwnership(
+            nodesById,
+            edges,
+            retained);
+
+        RemoveRedundantBodyWireEdges(
+            nodesById,
+            edges,
+            retained,
+            options);
+
+        RemoveWeakFalseJunctions(
+            nodesById,
+            edges,
+            retained,
+            options);
+
+        return retained
+            .OrderBy(
+                edge =>
+                    edge.FirstNodeId)
+            .ThenBy(
+                edge =>
+                    edge.SecondNodeId)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Conserva solamente la mejor relación cuerpo-pin para cada pin o
+    /// terminal. Esto impide que un terminal situado entre dos componentes
+    /// termine perteneciendo simultáneamente a ambos.
+    /// </summary>
+    private static void ResolveExclusiveBodyOwnership(
+        IReadOnlyDictionary<int, SchematicElectricalNode> nodesById,
+        IReadOnlyList<SchematicElectricalEdge> edges,
+        ISet<SchematicElectricalEdge> retained)
+    {
+        IEnumerable<IGrouping<int, BodyOwnershipCandidate>> candidatesByPin =
+            edges
+                .Select(
+                    edge =>
+                        TryCreateBodyOwnershipCandidate(
+                            edge,
+                            nodesById))
+                .Where(
+                    candidate =>
+                        candidate is not null)
+                .Select(
+                    candidate =>
+                        candidate!.Value)
+                .GroupBy(
+                    candidate =>
+                        candidate.PinNodeId);
+
+        foreach (IGrouping<int, BodyOwnershipCandidate> group
+                 in candidatesByPin)
+        {
+            BodyOwnershipCandidate winner =
+                group
+                    .OrderByDescending(
+                        candidate =>
+                            candidate.Edge.Confidence)
+                    .ThenBy(
+                        candidate =>
+                            candidate.Edge.DistancePixels)
+                    .ThenBy(
+                        candidate =>
+                            candidate.BodyNodeId)
+                    .First();
+
+            foreach (BodyOwnershipCandidate candidate
+                     in group)
+            {
+                if (!ReferenceEquals(
+                        candidate.Edge,
+                        winner.Edge) &&
+                    candidate.Edge !=
+                    winner.Edge)
+                {
+                    retained.Remove(
+                        candidate.Edge);
+                }
+            }
+        }
+    }
+
+    private static BodyOwnershipCandidate? TryCreateBodyOwnershipCandidate(
+        SchematicElectricalEdge edge,
+        IReadOnlyDictionary<int, SchematicElectricalNode> nodesById)
+    {
+        SchematicElectricalNode first =
+            nodesById[edge.FirstNodeId];
+
+        SchematicElectricalNode second =
+            nodesById[edge.SecondNodeId];
+
+        bool firstIsBody =
+            first.Kind ==
+            SchematicElectricalNodeKind.SymbolBody;
+
+        bool secondIsBody =
+            second.Kind ==
+            SchematicElectricalNodeKind.SymbolBody;
+
+        bool firstIsPin =
+            first.Kind is
+                SchematicElectricalNodeKind.Pin or
+                SchematicElectricalNodeKind.Terminal;
+
+        bool secondIsPin =
+            second.Kind is
+                SchematicElectricalNodeKind.Pin or
+                SchematicElectricalNodeKind.Terminal;
+
+        if (firstIsBody &&
+            secondIsPin)
+        {
+            return new BodyOwnershipCandidate(
+                second.Id,
+                first.Id,
+                edge);
+        }
+
+        if (secondIsBody &&
+            firstIsPin)
+        {
+            return new BodyOwnershipCandidate(
+                first.Id,
+                second.Id,
+                edge);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Elimina una relación directa cuerpo-red cuando el mismo contacto ya
+    /// está modelado mediante cuerpo-pin y pin-red.
+    /// </summary>
+    private static void RemoveRedundantBodyWireEdges(
+        IReadOnlyDictionary<int, SchematicElectricalNode> nodesById,
+        IReadOnlyList<SchematicElectricalEdge> edges,
+        ISet<SchematicElectricalEdge> retained,
+        SchematicElectricalGraphBuilderOptions options)
+    {
+        IReadOnlyDictionary<int, IReadOnlyList<SchematicElectricalEdge>> adjacency =
+            BuildTemporaryAdjacency(
+                nodesById.Keys,
+                edges);
+
+        foreach (SchematicElectricalEdge edge
+                 in edges)
+        {
+            if (!retained.Contains(
+                    edge))
+            {
+                continue;
+            }
+
+            SchematicElectricalNode first =
+                nodesById[edge.FirstNodeId];
+
+            SchematicElectricalNode second =
+                nodesById[edge.SecondNodeId];
+
+            SchematicElectricalNode? body =
+                first.Kind ==
+                SchematicElectricalNodeKind.SymbolBody
+                    ? first
+                    : second.Kind ==
+                      SchematicElectricalNodeKind.SymbolBody
+                        ? second
+                        : null;
+
+            if (body is null)
+            {
+                continue;
+            }
+
+            SchematicElectricalNode other =
+                body.Id ==
+                first.Id
+                    ? second
+                    : first;
+
+            if (other.Kind is not
+                (SchematicElectricalNodeKind.Wire or
+                 SchematicElectricalNodeKind.Junction))
+            {
+                continue;
+            }
+
+            bool hasPinBridge =
+                adjacency[body.Id]
+                    .Where(
+                        bodyEdge =>
+                            retained.Contains(
+                                bodyEdge))
+                    .Select(
+                        bodyEdge =>
+                            nodesById[
+                                bodyEdge.GetOtherNodeId(
+                                    body.Id)])
+                    .Where(
+                        node =>
+                            node.Kind is
+                                SchematicElectricalNodeKind.Pin or
+                                SchematicElectricalNodeKind.Terminal)
+                    .Any(
+                        pin =>
+                            adjacency[pin.Id]
+                                .Where(
+                                    pinEdge =>
+                                        retained.Contains(
+                                            pinEdge))
+                                .Any(
+                                    pinEdge =>
+                                        pinEdge.GetOtherNodeId(
+                                            pin.Id) ==
+                                        other.Id));
+
+            if (hasPinBridge &&
+                edge.Confidence <
+                options.RedundantBodyWireRetentionConfidence)
+            {
+                retained.Remove(
+                    edge);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Una unión real debe participar en al menos dos relaciones lineales
+    /// confiables. Las uniones compactas con una sola relación débil suelen ser
+    /// texto rasterizado o ruido de segmentación.
+    /// </summary>
+    private static void RemoveWeakFalseJunctions(
+        IReadOnlyDictionary<int, SchematicElectricalNode> nodesById,
+        IReadOnlyList<SchematicElectricalEdge> edges,
+        ISet<SchematicElectricalEdge> retained,
+        SchematicElectricalGraphBuilderOptions options)
+    {
+        IReadOnlyDictionary<int, IReadOnlyList<SchematicElectricalEdge>> adjacency =
+            BuildTemporaryAdjacency(
+                nodesById.Keys,
+                edges);
+
+        foreach (SchematicElectricalNode junction
+                 in nodesById.Values.Where(
+                     node =>
+                         node.Kind ==
+                         SchematicElectricalNodeKind.Junction))
+        {
+            SchematicElectricalEdge[] activeLinearEdges =
+                adjacency[junction.Id]
+                    .Where(
+                        edge =>
+                            retained.Contains(
+                                edge))
+                    .Where(
+                        edge =>
+                        {
+                            SchematicElectricalNode other =
+                                nodesById[
+                                    edge.GetOtherNodeId(
+                                        junction.Id)];
+
+                            return other.IsWireLike ||
+                                   other.Kind ==
+                                   SchematicElectricalNodeKind.Wire;
+                        })
+                    .OrderByDescending(
+                        edge =>
+                            edge.Confidence)
+                    .ToArray();
+
+            if (activeLinearEdges.Length >= 2)
+            {
+                continue;
+            }
+
+            foreach (SchematicElectricalEdge weakEdge
+                     in activeLinearEdges.Where(
+                         edge =>
+                             edge.Confidence <
+                             options.MinimumSingleJunctionEdgeConfidence))
+            {
+                retained.Remove(
+                    weakEdge);
+            }
+        }
+    }
+
+    private static IReadOnlyDictionary<int, IReadOnlyList<SchematicElectricalEdge>> BuildTemporaryAdjacency(
+        IEnumerable<int> nodeIds,
+        IEnumerable<SchematicElectricalEdge> edges)
+    {
+        var adjacency =
+            nodeIds.ToDictionary(
+                id =>
+                    id,
+                _ =>
+                    new List<SchematicElectricalEdge>());
+
+        foreach (SchematicElectricalEdge edge
+                 in edges)
+        {
+            adjacency[edge.FirstNodeId].Add(
+                edge);
+
+            adjacency[edge.SecondNodeId].Add(
+                edge);
+        }
+
+        return adjacency.ToDictionary(
+            pair =>
+                pair.Key,
+            pair =>
+                (IReadOnlyList<SchematicElectricalEdge>)pair.Value);
+    }
+
+    private readonly record struct BodyOwnershipCandidate(
+        int PinNodeId,
+        int BodyNodeId,
+        SchematicElectricalEdge Edge);
 
     /// <summary>
     /// Construye los filtros utilizados por las consultas espaciales.
@@ -1595,6 +1960,18 @@ public sealed record SchematicElectricalGraphBuilderOptions
     public double AxisOverlapWeight { get; init; } = 0.20D;
     public double GapDistanceWeight { get; init; } = 0.28D;
 
+    /// <summary>
+    /// Una conexión directa cuerpo-red se conserva únicamente cuando supera
+    /// este nivel, aun si existe un pin intermedio.
+    /// </summary>
+    public double RedundantBodyWireRetentionConfidence { get; init; } = 0.92D;
+
+    /// <summary>
+    /// Confianza mínima para conservar una unión compacta que sólo dispone de
+    /// una relación lineal.
+    /// </summary>
+    public double MinimumSingleJunctionEdgeConfidence { get; init; } = 0.82D;
+
     public void Validate()
     {
         ValidateProbability(
@@ -1755,6 +2132,14 @@ public sealed record SchematicElectricalGraphBuilderOptions
         ValidateProbability(
             GapDistanceWeight,
             nameof(GapDistanceWeight));
+
+        ValidateProbability(
+            RedundantBodyWireRetentionConfidence,
+            nameof(RedundantBodyWireRetentionConfidence));
+
+        ValidateProbability(
+            MinimumSingleJunctionEdgeConfidence,
+            nameof(MinimumSingleJunctionEdgeConfidence));
     }
 
     private static void ValidatePositive(
