@@ -17,6 +17,7 @@ public sealed class SchematicElectricalGraphBuilder
     private readonly SchematicPrimitiveClassifier primitiveClassifier;
     private readonly SchematicPinConnector pinConnector;
     private readonly SchematicWireAssembler wireAssembler;
+    private readonly SchematicNetSegmentAssembler netSegmentAssembler;
     private readonly SchematicJunctionBuilder junctionBuilder;
     private readonly SchematicNetBuilder netBuilder;
 
@@ -25,6 +26,7 @@ public sealed class SchematicElectricalGraphBuilder
             new SchematicPrimitiveClassifier(),
             new SchematicPinConnector(),
             new SchematicWireAssembler(),
+            new SchematicNetSegmentAssembler(),
             new SchematicJunctionBuilder(),
             new SchematicNetBuilder())
     {
@@ -36,6 +38,7 @@ public sealed class SchematicElectricalGraphBuilder
             primitiveClassifier,
             new SchematicPinConnector(),
             new SchematicWireAssembler(),
+            new SchematicNetSegmentAssembler(),
             new SchematicJunctionBuilder(),
             new SchematicNetBuilder())
     {
@@ -48,6 +51,7 @@ public sealed class SchematicElectricalGraphBuilder
             primitiveClassifier,
             pinConnector,
             new SchematicWireAssembler(),
+            new SchematicNetSegmentAssembler(),
             new SchematicJunctionBuilder(),
             new SchematicNetBuilder())
     {
@@ -61,6 +65,7 @@ public sealed class SchematicElectricalGraphBuilder
             primitiveClassifier,
             pinConnector,
             wireAssembler,
+            new SchematicNetSegmentAssembler(),
             new SchematicJunctionBuilder(),
             new SchematicNetBuilder())
     {
@@ -75,6 +80,7 @@ public sealed class SchematicElectricalGraphBuilder
             primitiveClassifier,
             pinConnector,
             wireAssembler,
+            new SchematicNetSegmentAssembler(),
             junctionBuilder,
             new SchematicNetBuilder())
     {
@@ -84,6 +90,23 @@ public sealed class SchematicElectricalGraphBuilder
         SchematicPrimitiveClassifier primitiveClassifier,
         SchematicPinConnector pinConnector,
         SchematicWireAssembler wireAssembler,
+        SchematicJunctionBuilder junctionBuilder,
+        SchematicNetBuilder netBuilder)
+        : this(
+            primitiveClassifier,
+            pinConnector,
+            wireAssembler,
+            new SchematicNetSegmentAssembler(),
+            junctionBuilder,
+            netBuilder)
+    {
+    }
+
+    public SchematicElectricalGraphBuilder(
+        SchematicPrimitiveClassifier primitiveClassifier,
+        SchematicPinConnector pinConnector,
+        SchematicWireAssembler wireAssembler,
+        SchematicNetSegmentAssembler netSegmentAssembler,
         SchematicJunctionBuilder junctionBuilder,
         SchematicNetBuilder netBuilder)
     {
@@ -98,6 +121,10 @@ public sealed class SchematicElectricalGraphBuilder
         this.wireAssembler =
             wireAssembler ??
             throw new ArgumentNullException(nameof(wireAssembler));
+
+        this.netSegmentAssembler =
+            netSegmentAssembler ??
+            throw new ArgumentNullException(nameof(netSegmentAssembler));
 
         this.junctionBuilder =
             junctionBuilder ??
@@ -301,6 +328,16 @@ public sealed class SchematicElectricalGraphBuilder
 
         normalizedEdges.AddRange(
             assembledWireEdges);
+
+        IReadOnlyList<SchematicElectricalEdge> netSegmentEdges =
+            netSegmentAssembler.Assemble(
+                nodes,
+                normalizedEdges,
+                options,
+                cancellationToken);
+
+        normalizedEdges.AddRange(
+            netSegmentEdges);
 
         IReadOnlyList<SchematicElectricalEdge> junctionEdges =
             junctionBuilder.Build(
