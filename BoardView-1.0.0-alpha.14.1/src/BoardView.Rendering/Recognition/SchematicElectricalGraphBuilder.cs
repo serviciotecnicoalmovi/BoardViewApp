@@ -16,8 +16,10 @@ public sealed class SchematicElectricalGraphBuilder
 {
     private readonly SchematicPrimitiveClassifier primitiveClassifier;
     private readonly SchematicPinConnector pinConnector;
+    private readonly SchematicSymbolTerminalSynthesizer terminalSynthesizer;
     private readonly SchematicWireAssembler wireAssembler;
     private readonly SchematicNetSegmentAssembler netSegmentAssembler;
+    private readonly SchematicEndpointTopologyBuilder endpointTopologyBuilder;
     private readonly SchematicJunctionBuilder junctionBuilder;
     private readonly SchematicNetBuilder netBuilder;
 
@@ -25,8 +27,10 @@ public sealed class SchematicElectricalGraphBuilder
         : this(
             new SchematicPrimitiveClassifier(),
             new SchematicPinConnector(),
+            new SchematicSymbolTerminalSynthesizer(),
             new SchematicWireAssembler(),
             new SchematicNetSegmentAssembler(),
+            new SchematicEndpointTopologyBuilder(),
             new SchematicJunctionBuilder(),
             new SchematicNetBuilder())
     {
@@ -37,8 +41,10 @@ public sealed class SchematicElectricalGraphBuilder
         : this(
             primitiveClassifier,
             new SchematicPinConnector(),
+            new SchematicSymbolTerminalSynthesizer(),
             new SchematicWireAssembler(),
             new SchematicNetSegmentAssembler(),
+            new SchematicEndpointTopologyBuilder(),
             new SchematicJunctionBuilder(),
             new SchematicNetBuilder())
     {
@@ -50,8 +56,10 @@ public sealed class SchematicElectricalGraphBuilder
         : this(
             primitiveClassifier,
             pinConnector,
+            new SchematicSymbolTerminalSynthesizer(),
             new SchematicWireAssembler(),
             new SchematicNetSegmentAssembler(),
+            new SchematicEndpointTopologyBuilder(),
             new SchematicJunctionBuilder(),
             new SchematicNetBuilder())
     {
@@ -64,8 +72,10 @@ public sealed class SchematicElectricalGraphBuilder
         : this(
             primitiveClassifier,
             pinConnector,
+            new SchematicSymbolTerminalSynthesizer(),
             wireAssembler,
             new SchematicNetSegmentAssembler(),
+            new SchematicEndpointTopologyBuilder(),
             new SchematicJunctionBuilder(),
             new SchematicNetBuilder())
     {
@@ -79,8 +89,10 @@ public sealed class SchematicElectricalGraphBuilder
         : this(
             primitiveClassifier,
             pinConnector,
+            new SchematicSymbolTerminalSynthesizer(),
             wireAssembler,
             new SchematicNetSegmentAssembler(),
+            new SchematicEndpointTopologyBuilder(),
             junctionBuilder,
             new SchematicNetBuilder())
     {
@@ -95,8 +107,10 @@ public sealed class SchematicElectricalGraphBuilder
         : this(
             primitiveClassifier,
             pinConnector,
+            new SchematicSymbolTerminalSynthesizer(),
             wireAssembler,
             new SchematicNetSegmentAssembler(),
+            new SchematicEndpointTopologyBuilder(),
             junctionBuilder,
             netBuilder)
     {
@@ -105,8 +119,10 @@ public sealed class SchematicElectricalGraphBuilder
     public SchematicElectricalGraphBuilder(
         SchematicPrimitiveClassifier primitiveClassifier,
         SchematicPinConnector pinConnector,
+        SchematicSymbolTerminalSynthesizer terminalSynthesizer,
         SchematicWireAssembler wireAssembler,
         SchematicNetSegmentAssembler netSegmentAssembler,
+        SchematicEndpointTopologyBuilder endpointTopologyBuilder,
         SchematicJunctionBuilder junctionBuilder,
         SchematicNetBuilder netBuilder)
     {
@@ -118,6 +134,10 @@ public sealed class SchematicElectricalGraphBuilder
             pinConnector ??
             throw new ArgumentNullException(nameof(pinConnector));
 
+        this.terminalSynthesizer =
+            terminalSynthesizer ??
+            throw new ArgumentNullException(nameof(terminalSynthesizer));
+
         this.wireAssembler =
             wireAssembler ??
             throw new ArgumentNullException(nameof(wireAssembler));
@@ -125,6 +145,10 @@ public sealed class SchematicElectricalGraphBuilder
         this.netSegmentAssembler =
             netSegmentAssembler ??
             throw new ArgumentNullException(nameof(netSegmentAssembler));
+
+        this.endpointTopologyBuilder =
+            endpointTopologyBuilder ??
+            throw new ArgumentNullException(nameof(endpointTopologyBuilder));
 
         this.junctionBuilder =
             junctionBuilder ??
@@ -163,7 +187,7 @@ public sealed class SchematicElectricalGraphBuilder
         BoardGeometryIndexQueryOptions queryOptions =
             CreateQueryOptions(options);
 
-        SchematicElectricalNode[] nodes =
+        SchematicElectricalNode[] baseNodes =
             geometryIndex.Components
                 .Where(component =>
                     component.Confidence >=
@@ -183,6 +207,15 @@ public sealed class SchematicElectricalGraphBuilder
                         primitive.Kind,
                         component);
                 })
+                .OrderBy(node => node.Id)
+                .ToArray();
+
+        SchematicElectricalNode[] nodes =
+            terminalSynthesizer
+                .Synthesize(
+                    baseNodes,
+                    options,
+                    cancellationToken)
                 .OrderBy(node => node.Id)
                 .ToArray();
 
@@ -338,6 +371,16 @@ public sealed class SchematicElectricalGraphBuilder
 
         normalizedEdges.AddRange(
             netSegmentEdges);
+
+        IReadOnlyList<SchematicElectricalEdge> endpointTopologyEdges =
+            endpointTopologyBuilder.Build(
+                nodes,
+                normalizedEdges,
+                options,
+                cancellationToken);
+
+        normalizedEdges.AddRange(
+            endpointTopologyEdges);
 
         IReadOnlyList<SchematicElectricalEdge> junctionEdges =
             junctionBuilder.Build(
