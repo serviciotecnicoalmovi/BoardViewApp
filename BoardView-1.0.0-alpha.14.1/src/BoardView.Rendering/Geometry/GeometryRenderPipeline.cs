@@ -370,6 +370,7 @@ public sealed class GeometryRenderPipeline : IDisposable
 
         BoardReferenceAssociationResult referenceAssociation;
         SchematicSymbolAssemblyResult schematicSymbols;
+        SchematicComponentGraphResult schematicComponents;
 
         if (documentRole == GeometryDocumentRole.Schematic)
         {
@@ -407,6 +408,17 @@ public sealed class GeometryRenderPipeline : IDisposable
                     referenceAnchors,
                     options.SchematicSymbolAssemblerOptions,
                     cancellationToken);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var componentGraphBuilder =
+                new SchematicComponentGraphBuilder();
+
+            schematicComponents =
+                componentGraphBuilder.Build(
+                    electricalGraph,
+                    referenceAnchors,
+                    cancellationToken);
         }
         else
         {
@@ -419,6 +431,9 @@ public sealed class GeometryRenderPipeline : IDisposable
 
             schematicSymbols =
                 SchematicSymbolAssemblyResult.Empty;
+
+            schematicComponents =
+                SchematicComponentGraphResult.Empty;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -466,6 +481,7 @@ public sealed class GeometryRenderPipeline : IDisposable
             referenceAssociation,
             referenceIndex,
             schematicSymbols,
+            schematicComponents,
             selection,
             analysis,
             cropResult);
@@ -996,6 +1012,7 @@ public sealed record GeometryRenderResult(
     BoardReferenceAssociationResult ReferenceAssociation,
     BoardReferenceIndex ReferenceIndex,
     SchematicSymbolAssemblyResult SchematicSymbols,
+    SchematicComponentGraphResult SchematicComponents,
     BoardGeometryComponentSelectionResult Selection,
     BoardGeometryAnalysisResult Analysis,
     BoardGeometryCropResult? CropResult)
@@ -1191,12 +1208,37 @@ public sealed record GeometryRenderResult(
     }
 
     /// <summary>
+    /// Obtiene un componente eléctrico reconstruido por su referencia.
+    /// </summary>
+    public bool TryGetSchematicComponent(
+        string reference,
+        out SchematicGraphComponent? component)
+    {
+        return SchematicComponents.TryGetByReference(
+            reference,
+            out component);
+    }
+
+    /// <summary>
     /// Obtiene los límites preferidos para centrar y resaltar una referencia.
+    /// Prioriza el componente eléctrico reconstruido, conserva el símbolo
+    /// ensamblado como respaldo y finalmente utiliza el componente geométrico.
     /// </summary>
     public bool TryGetReferenceSelectionBounds(
         string reference,
         out BoardGeometryBounds bounds)
     {
+        if (SchematicComponents.TryGetByReference(
+                reference,
+                out SchematicGraphComponent? reconstructedComponent) &&
+            reconstructedComponent is not null)
+        {
+            bounds =
+                reconstructedComponent.Bounds;
+
+            return true;
+        }
+
         if (SchematicSymbols.TryGetByReference(
                 reference,
                 out SchematicSymbol? symbol) &&
